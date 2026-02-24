@@ -7,7 +7,7 @@ Email delivery library for Erlang — composable email builder with swappable ad
 - **Builder** — functional, chainable email construction with address normalization
 - **Attachments** — from file path, binary data, or inline with content-id
 - **Mailer** — behaviour-based mailer modules with validation on delivery
-- **Adapters** — SMTP (via gen_smtp), SendGrid API, logger, and test
+- **Adapters** — SMTP, SendGrid, Mailgun, Amazon SES, logger, and test
 - **Content Types** — automatic MIME type detection for attachments
 
 ## Quick Start
@@ -77,8 +77,36 @@ Email7 = hikyaku_email:attachment(Email6, Logo).
 |---|---|---|
 | `hikyaku_adapter_smtp` | SMTP via gen_smtp | `relay`, `port`, `username`, `password`, `ssl`, `tls` |
 | `hikyaku_adapter_sendgrid` | SendGrid v3 API | `api_key`, `http_client` |
+| `hikyaku_adapter_mailgun` | Mailgun Messages API | `api_key`, `domain`, `base_url`, `http_client` |
+| `hikyaku_adapter_ses` | Amazon SES v2 API | `access_key`, `secret_key`, `region`, `http_client` |
 | `hikyaku_adapter_logger` | Logs emails via logger | `level` |
 | `hikyaku_adapter_test` | Sends to a process | `pid` |
+
+### Mailgun
+
+```erlang
+config() ->
+    #{
+        adapter => hikyaku_adapter_mailgun,
+        api_key => <<"key-xxx">>,
+        domain => <<"mg.example.com">>,
+        base_url => <<"https://api.eu.mailgun.net">>  %% optional, defaults to US region
+    }.
+```
+
+### Amazon SES
+
+```erlang
+config() ->
+    #{
+        adapter => hikyaku_adapter_ses,
+        access_key => <<"AKIA...">>,
+        secret_key => <<"...">>,
+        region => <<"us-east-1">>
+    }.
+```
+
+SES uses the v2 JSON API for simple emails and automatically falls back to raw MIME encoding when attachments are present. Authentication uses AWS Signature V4 — no external dependencies required beyond OTP `crypto`.
 
 ## Testing
 
