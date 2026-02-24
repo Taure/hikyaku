@@ -165,4 +165,4 @@ format_address(#hikyaku_address{name = Name, address = Addr}) ->
 
 format_address_list(Addrs) ->
     Formatted = [format_address(A) || A <- Addrs],
-    lists:join(<<", ">>, Formatted).
+    iolist_to_binary(lists:join(<<", ">>, Formatted)).
