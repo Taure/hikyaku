@@ -10,4 +10,9 @@ jobs:
   ci:
     uses: Taure/erlang-ci/.github/workflows/ci.yml@v1
     with:
+      enable-dependency-submission: true
+      enable-summary: true
+      enable-sbom-scan: true
+      enable-sbom: true
+      enable-coverage: true
       enable-audit: false
