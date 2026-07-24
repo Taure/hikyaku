@@ -3,7 +3,7 @@
 
 -include("hikyaku.hrl").
 
--export([deliver/2, build_mimemail/1]).
+-export([deliver/2, build_mimemail/1, build_smtp_opts/1]).
 
 -spec deliver(#hikyaku_email{}, map()) -> {ok, map()} | {error, term()}.
 deliver(Email, Config) ->
@@ -53,11 +53,35 @@ build_smtp_opts(Config) ->
             true -> Opts1 ++ [{ssl, true}];
             false -> Opts1
         end,
-    case maps:get(tls, Config, if_available) of
-        always -> Opts2 ++ [{tls, always}];
-        never -> Opts2 ++ [{tls, never}];
-        if_available -> Opts2 ++ [{tls, if_available}]
+    Tls = maps:get(tls, Config, if_available),
+    Opts3 =
+        case Tls of
+            always -> Opts2 ++ [{tls, always}];
+            never -> Opts2 ++ [{tls, never}];
+            if_available -> Opts2 ++ [{tls, if_available}]
+        end,
+    %% When TLS is used at all, authenticate the relay's certificate. gen_smtp's
+    %% default tls_options are verify_none, so without this an on-path attacker
+    %% can present any cert, complete STARTTLS, and capture the SMTP AUTH
+    %% credentials. Callers can override via a `tls_options` config key.
+    case Tls =/= never orelse maps:get(ssl, Config, false) of
+        true -> Opts3 ++ [{tls_options, tls_options(Config)}];
+        false -> Opts3
     end.
+
+tls_options(Config) ->
+    maps:get(tls_options, Config, default_tls_options()).
+
+default_tls_options() ->
+    [
+        {verify, verify_peer},
+        {cacerts, public_key:cacerts_get()},
+        {depth, 3},
+        {versions, ['tlsv1.2', 'tlsv1.3']},
+        {customize_hostname_check, [
+            {match_fun, public_key:pkix_verify_hostname_match_fun(https)}
+        ]}
+    ].
 
 build_mimemail(Email) ->
     #hikyaku_email{
