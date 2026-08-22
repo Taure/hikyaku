@@ -3,6 +3,9 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: write
+
 jobs:
   release:
     uses: Taure/erlang-ci/.github/workflows/release.yml@v1
