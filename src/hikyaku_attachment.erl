@@ -2,56 +2,88 @@
 
 -include("hikyaku.hrl").
 
+-define(CONTENT_TYPE_RE,
+    ~"\\A[!#$%&'*+.^_`|~0-9A-Za-z-]+/[!#$%&'*+.^_`|~0-9A-Za-z-]+\\z"
+).
+
 -export([
     from_path/1,
     from_path/2,
     from_data/2,
     from_data/3,
-    inline/2
+    inline/2,
+    validate/1
 ]).
 
 -spec from_path(binary()) -> #hikyaku_attachment{}.
 from_path(Path) when is_binary(Path) ->
     Filename = filename:basename(Path),
     ContentType = detect_content_type(Filename),
-    #hikyaku_attachment{
+    validate(#hikyaku_attachment{
         filename = iolist_to_binary(Filename),
         content_type = ContentType,
         path = Path
-    }.
+    }).
 
 -spec from_path(binary(), map()) -> #hikyaku_attachment{}.
 from_path(Path, Opts) when is_binary(Path), is_map(Opts) ->
     Att = from_path(Path),
-    apply_opts(Att, Opts).
+    validate(apply_opts(Att, Opts)).
 
 -spec from_data(binary(), binary()) -> #hikyaku_attachment{}.
 from_data(Filename, Data) when is_binary(Filename), is_binary(Data) ->
     ContentType = detect_content_type(Filename),
-    #hikyaku_attachment{
+    validate(#hikyaku_attachment{
         filename = Filename,
         content_type = ContentType,
         data = Data
-    }.
+    }).
 
 -spec from_data(binary(), binary(), map()) -> #hikyaku_attachment{}.
 from_data(Filename, Data, Opts) when is_binary(Filename), is_binary(Data), is_map(Opts) ->
     Att = from_data(Filename, Data),
-    apply_opts(Att, Opts).
+    validate(apply_opts(Att, Opts)).
 
 -spec inline(binary(), binary()) -> #hikyaku_attachment{}.
 inline(Cid, Path) when is_binary(Cid), is_binary(Path) ->
     Filename = filename:basename(Path),
     ContentType = detect_content_type(Filename),
-    #hikyaku_attachment{
+    validate(#hikyaku_attachment{
         filename = iolist_to_binary(Filename),
         content_type = ContentType,
         path = Path,
         disposition = inline,
         cid = Cid
-    }.
+    }).
+
+-doc """
+Checks that an attachment is safe to put into MIME and form-data headers.
+
+The content type must be a bare `type/subtype` made of RFC 9110 token
+characters (no parameters), the filename must not contain control
+characters, and a content id must be printable ASCII without `<` or `>`.
+Returns the attachment, or raises `{invalid_attachment, Field, Value}`.
+All builders in this module and `hikyaku_email:attachment/2` call it.
+""".
+-spec validate(#hikyaku_attachment{}) -> #hikyaku_attachment{}.
+validate(
+    #hikyaku_attachment{filename = Filename, content_type = ContentType, cid = Cid} = Att
+) ->
+    check(content_type, ContentType, ?CONTENT_TYPE_RE),
+    check(filename, Filename, ~"\\A[^\\x00-\\x1f\\x7f]+\\z"),
+    case Cid of
+        undefined -> ok;
+        _ -> check(cid, Cid, ~"\\A[!-;=?-~]+\\z")
+    end,
+    Att.
 
 %%% Internal
+
+check(Field, Value, Re) ->
+    case re:run(Value, Re) of
+        nomatch -> error({invalid_attachment, Field, Value});
+        {match, _} -> ok
+    end.
 
 apply_opts(Att, Opts) ->
     Att1 =

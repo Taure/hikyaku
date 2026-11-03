@@ -89,9 +89,15 @@ text_body(Email, Body) when is_binary(Body) ->
 html_body(Email, Body) when is_binary(Body) ->
     Email#hikyaku_email{html_body = Body}.
 
+-doc """
+Adds an attachment.
+
+Raises `{invalid_attachment, Field, Value}` if the attachment fails the
+checks in `hikyaku_attachment:validate/1`.
+""".
 -spec attachment(#hikyaku_email{}, #hikyaku_attachment{}) -> #hikyaku_email{}.
 attachment(Email = #hikyaku_email{attachments = Current}, Att = #hikyaku_attachment{}) ->
-    Email#hikyaku_email{attachments = Current ++ [Att]}.
+    Email#hikyaku_email{attachments = Current ++ [hikyaku_attachment:validate(Att)]}.
 
 -doc """
 Sets a custom header.

@@ -197,3 +197,11 @@ header_accepts_message_id_and_list_unsubscribe_test() ->
         #{~"Message-ID" => ~"<id@example.com>", ~"List-Unsubscribe" => ~"<mailto:u@example.com>"},
         hikyaku_email:headers(E1)
     ).
+
+attachment_rejects_invalid_record_test() ->
+    Att = (hikyaku_attachment:from_data(~"a.txt", ~"data"))#hikyaku_attachment{
+        content_type = ~"text/plain\r\nX-CT: 1"
+    },
+    ?assertError(
+        {invalid_attachment, content_type, _}, hikyaku_email:attachment(hikyaku_email:new(), Att)
+    ).
