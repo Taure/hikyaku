@@ -51,9 +51,9 @@ Addresses accept a binary (`<<"bob@example.com">>`), a `{Name, Address}` tuple, 
 
 Use `to/2`, `cc/2`, `bcc/2` to append recipients, or `put_to/2`, `put_cc/2`, `put_bcc/2` to replace the entire list.
 
-Display names containing RFC 5322 specials (such as `,` or `<`) are sent as quoted strings. Addresses and names with control characters, and addresses containing whitespace, `<`, `>` or `,`, raise `{invalid_address, _}`.
+Each address must be a single bare mailbox that gen_smtp can parse (`local@domain`; plus addressing, IDN domains and quoted local parts such as `"a"@b.com` are fine), otherwise `{invalid_address, address, Address}` is raised. Display names containing RFC 5322 specials (such as `,` or `<`) are sent as quoted strings; a name with control characters raises `{invalid_address, name, Name}`, and an empty name counts as no name.
 
-Custom headers are set with `header/3`. The name must be printable ASCII without `:` (at most 76 characters) and the value must not contain CR or LF, otherwise `{invalid_header, Name}` is raised. Headers hikyaku derives from other fields (`From`, `To`, `Cc`, `Bcc`, `Reply-To`, `Subject`, `Content-Type`, `MIME-Version`, `Content-Transfer-Encoding`) raise `{reserved_header, Name}`.
+Custom headers are set with `header/3`. The name must be printable ASCII without `:` (at most 76 characters) and the value must not contain control characters other than tab, otherwise `{invalid_header, Name}` is raised. Headers hikyaku derives from other fields (`From`, `To`, `Cc`, `Bcc`, `Reply-To`, `Subject`, `Content-Type`, `MIME-Version`, `Content-Transfer-Encoding`) or that providers set themselves (`Received`, `DKIM-Signature`, SendGrid's `X-SG-ID` and `X-SG-EID`) raise `{reserved_header, Name}`.
 
 ### Attachments
 
@@ -135,7 +135,7 @@ config() ->
     }.
 ```
 
-Attachments (including inline parts with a content id) and custom headers are sent through the v3 `mail/send` API.
+Attachments (including inline parts with a content id) and custom headers are sent through the v3 `mail/send` API. SendGrid does not accept parameters in an attachment `type`, so only the bare media type (for example `text/csv`) is sent.
 
 ### Mailgun
 
@@ -161,7 +161,7 @@ config() ->
     }.
 ```
 
-SES uses the v2 JSON API for simple emails and automatically falls back to raw MIME encoding when attachments or custom headers are present. Authentication uses AWS Signature V4 — no external dependencies required beyond OTP `crypto`.
+SES uses the v2 JSON API for simple emails and automatically falls back to raw MIME encoding when attachments or custom headers are present. Authentication uses AWS Signature V4, with no external dependencies beyond OTP `crypto`.
 
 ## Testing
 
