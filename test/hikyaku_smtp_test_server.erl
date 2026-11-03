@@ -1,10 +1,14 @@
 -module(hikyaku_smtp_test_server).
 
 -include_lib("public_key/include/public_key.hrl").
+-include_lib("kernel/src/inet_dns.hrl").
 
--export([pki/0, start/2, stop/1]).
+-export([pki/0, pki/1, start/2, stop/1, start_dns/0, stop_dns/1]).
 
 pki() ->
+    pki(0).
+
+pki(Intermediates) ->
     San = #'Extension'{
         extnID = ?'id-ce-subjectAltName',
         extnValue = [{dNSName, "localhost"}],
@@ -12,7 +16,11 @@ pki() ->
     },
     Cert = [{key, {namedCurve, ?secp256r1}}, {digest, sha256}],
     #{server_config := Server, client_config := Client} = public_key:pkix_test_data(#{
-        server_chain => #{root => Cert, intermediates => [], peer => [{extensions, [San]} | Cert]},
+        server_chain => #{
+            root => Cert,
+            intermediates => [Cert || _ <- lists:seq(1, Intermediates)],
+            peer => [{extensions, [San]} | Cert]
+        },
         client_chain => #{root => Cert, intermediates => [], peer => Cert}
     }),
     #{server => Server, cacerts => proplists:get_value(cacerts, Client)}.
@@ -120,3 +128,59 @@ recv({ssl, Sock}) -> ssl:recv(Sock, 0, 5000).
 
 close({tcp, Sock}) -> gen_tcp:close(Sock);
 close({ssl, Sock}) -> ssl:close(Sock).
+
+%% A resolver that answers every MX query with `localhost`, standing in for
+%% a spoofed DNS reply. Returns the saved resolver state for stop_dns/1.
+start_dns() ->
+    {ok, Sock} = gen_udp:open(0, [binary, {ip, {127, 0, 0, 1}}, {active, false}]),
+    {ok, Port} = inet:port(Sock),
+    Pid = spawn(fun() ->
+        receive
+            go -> dns_loop(Sock)
+        end
+    end),
+    ok = gen_udp:controlling_process(Sock, Pid),
+    Pid ! go,
+    Keys = [resolv_conf, nameservers, alt_nameservers, search],
+    Saved = [{K, inet_db:res_option(K)} || K <- Keys],
+    ok = inet_db:res_option(resolv_conf, ""),
+    ok = inet_db:res_option(nameservers, [{{127, 0, 0, 1}, Port}]),
+    ok = inet_db:res_option(alt_nameservers, []),
+    ok = inet_db:res_option(search, []),
+    {Pid, Saved}.
+
+stop_dns({Pid, Saved}) ->
+    [ok = inet_db:res_option(K, V) || {K, V} <- Saved],
+    exit(Pid, kill),
+    ok.
+
+dns_loop(Sock) ->
+    case gen_udp:recv(Sock, 0) of
+        {ok, {{_, _, _, _} = Ip, Port, Packet}} ->
+            {ok,
+                #dns_rec{header = Header, qdlist = [#dns_query{domain = Domain, type = Type}]} =
+                    Query} =
+                inet_dns:decode(Packet),
+            Answers =
+                case Type of
+                    mx ->
+                        [
+                            #dns_rr{
+                                domain = Domain,
+                                type = mx,
+                                class = in,
+                                ttl = 60,
+                                data = {10, "localhost"}
+                            }
+                        ];
+                    _ ->
+                        []
+                end,
+            Reply = Query#dns_rec{
+                header = Header#dns_header{qr = true, aa = true, ra = true}, anlist = Answers
+            },
+            ok = gen_udp:send(Sock, Ip, Port, inet_dns:encode(Reply)),
+            dns_loop(Sock);
+        {error, _} ->
+            ok
+    end.

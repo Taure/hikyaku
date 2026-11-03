@@ -56,7 +56,7 @@ build_smtp_opts(Config) ->
             true -> Opts1 ++ [{ssl, true}, {sockopts, tls_options(Relay, Config)}];
             false -> Opts1
         end,
-    Tls = maps:get(tls, Config, default_tls(Ssl, Username)),
+    Tls = maps:get(tls, Config, default_tls(Ssl, Username, Relay)),
     Opts3 =
         case Tls of
             always -> Opts2 ++ [{tls, always}];
@@ -68,28 +68,58 @@ build_smtp_opts(Config) ->
             never -> Opts3;
             _ -> Opts3 ++ [{tls_options, tls_options(Relay, Config)}]
         end,
-    case maps:get(no_mx_lookups, Config, false) of
+    case no_mx_lookups(Relay, Config) of
         true -> Opts4 ++ [{no_mx_lookups, true}];
         false -> Opts4
     end.
 
-%% With credentials configured, `if_available` would let an on-path attacker
-%% strip STARTTLS from the EHLO reply and read the AUTH exchange in clear.
-default_tls(false, Username) when Username =/= undefined -> always;
-default_tls(_Ssl, _Username) -> if_available.
+%% `if_available` lets an on-path attacker strip STARTTLS from the EHLO reply
+%% and read the AUTH exchange and the message in clear, so it is only the
+%% default for an unauthenticated loopback relay.
+default_tls(true, _Username, _Relay) ->
+    if_available;
+default_tls(false, undefined, Relay) ->
+    case is_loopback(Relay) of
+        true -> if_available;
+        false -> always
+    end;
+default_tls(false, _Username, _Relay) ->
+    always.
+
+%% Without a name to verify against, the certificate check cannot tell the
+%% relay from whatever host a spoofed MX answer points at, so dial the relay.
+no_mx_lookups(Relay, Config) ->
+    TlsOpts = maps:get(tls_options, Config, []),
+    maps:get(no_mx_lookups, Config, false) orelse is_ip_address(Relay) orelse
+        proplists:get_value(server_name_indication, TlsOpts) =:= disable.
 
 %% gen_smtp may dial an MX host or a resolved IP address rather than the relay
 %% name, and a STARTTLS upgrade has no host name at all, so the relay name is
 %% pinned as SNI and as the reference identity for certificate verification.
+%% gen_smtp's own ssl defaults include `{depth, 0}`, which rejects any chain
+%% with an intermediate, so caller options get a depth unless they set one.
 tls_options(Relay, Config) ->
-    TlsOpts = maps:get(tls_options, Config, default_tls_options()),
-    case proplists:is_defined(server_name_indication, TlsOpts) orelse is_ip_address(Relay) of
-        true -> TlsOpts;
-        false -> [{server_name_indication, Relay} | TlsOpts]
+    TlsOpts0 = maps:get(tls_options, Config, default_tls_options()),
+    TlsOpts1 =
+        case proplists:is_defined(depth, TlsOpts0) of
+            true -> TlsOpts0;
+            false -> TlsOpts0 ++ [{depth, 3}]
+        end,
+    case proplists:is_defined(server_name_indication, TlsOpts1) orelse is_ip_address(Relay) of
+        true -> TlsOpts1;
+        false -> [{server_name_indication, Relay} | TlsOpts1]
     end.
 
 is_ip_address(Host) ->
     element(1, inet:parse_address(Host)) =:= ok.
+
+is_loopback(Host) ->
+    case inet:parse_address(Host) of
+        {ok, {127, _, _, _}} -> true;
+        {ok, {0, 0, 0, 0, 0, 0, 0, 1}} -> true;
+        {ok, _} -> false;
+        {error, _} -> string:lowercase(Host) =:= "localhost"
+    end.
 
 default_tls_options() ->
     [
@@ -130,8 +160,25 @@ build_mimemail(Email) ->
             _ -> Headers1 ++ [{<<"Reply-To">>, format_address(ReplyTo)}]
         end,
     Headers3 = Headers2 ++ maps:fold(fun(K, V, Acc) -> [{K, V} | Acc] end, [], CustomHeaders),
+    Headers4 =
+        case lists:member(~"message-id", [string:lowercase(K) || K <- maps:keys(CustomHeaders)]) of
+            true -> Headers3;
+            false -> Headers3 ++ [{~"Message-ID", message_id(From)}]
+        end,
     {Type, SubType, BodyHeaders, _Params, SubParts} = build_body(Text, Html, Attachments),
-    {Type, SubType, Headers3 ++ BodyHeaders, #{}, SubParts}.
+    {Type, SubType, Headers4 ++ BodyHeaders, #{}, SubParts}.
+
+%% mimemail would otherwise generate one from the host FQDN, which leaks the
+%% sending machine's name to every recipient.
+message_id(#hikyaku_address{address = Address}) ->
+    Random = binary:encode_hex(crypto:strong_rand_bytes(16), lowercase),
+    <<"<", Random/binary, "@", (domain(Address))/binary, ">">>.
+
+domain(Address) ->
+    case binary:split(Address, ~"@") of
+        [_, Rest] -> domain(Rest);
+        [Domain] -> Domain
+    end.
 
 build_body(Text, Html, Attachments) when Attachments =/= [] ->
     ContentParts = content_parts(Text, Html),

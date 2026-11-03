@@ -19,7 +19,11 @@ tls_test_() ->
                 {"implicit TLS honours tls_options", fun() -> ssl_trusted(Pki) end},
                 {"implicit TLS rejects an untrusted relay by default", fun() ->
                     ssl_untrusted(Pki)
-                end}
+                end},
+                {"an IP relay is dialled directly despite a spoofed MX answer", fun() ->
+                    ip_relay_ignores_mx(Pki)
+                end},
+                {"caller tls_options accept a chain with an intermediate", fun intermediate_chain/0}
             ]
         end}.
 
@@ -67,6 +71,38 @@ ssl_untrusted(Pki) ->
         Config = config(Port, #{ssl => true, username => ~"user", password => ~"secret"}),
         ?assertMatch({error, _}, hikyaku_adapter_smtp:deliver(email(), Config)),
         ?assertNot(auth_seen())
+    end).
+
+ip_relay_ignores_mx(#{cacerts := CaCerts} = Pki) ->
+    Dns = hikyaku_smtp_test_server:start_dns(),
+    try
+        with_server(ssl, Pki, fun(Port) ->
+            Config = #{
+                relay => ~"127.0.0.2",
+                port => Port,
+                ssl => true,
+                username => ~"user",
+                password => ~"secret",
+                tls_options => [{verify, verify_peer}, {cacerts, CaCerts}]
+            },
+            ?assertMatch({error, _}, hikyaku_adapter_smtp:deliver(email(), Config)),
+            ?assertNot(auth_seen())
+        end)
+    after
+        hikyaku_smtp_test_server:stop_dns(Dns)
+    end.
+
+intermediate_chain() ->
+    #{cacerts := CaCerts} = Pki = hikyaku_smtp_test_server:pki(1),
+    with_server(ssl, Pki, fun(Port) ->
+        Config = config(Port, #{
+            ssl => true,
+            username => ~"user",
+            password => ~"secret",
+            tls_options => [{verify, verify_peer}, {cacerts, CaCerts}]
+        }),
+        ?assertMatch({ok, #{status := sent}}, hikyaku_adapter_smtp:deliver(email(), Config)),
+        ?assertEqual({auth, ssl}, next_event())
     end).
 
 %%% Helpers

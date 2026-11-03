@@ -81,7 +81,6 @@ smtp_opts_tls_always_verifies_peer_test() ->
     ?assertNotEqual(undefined, proplists:get_value(customize_hostname_check, TlsOpts)).
 
 smtp_opts_default_tls_verifies_peer_test() ->
-    %% tls defaults to if_available, which still upgrades - so it must verify.
     Opts = hikyaku_adapter_smtp:build_smtp_opts(#{relay => <<"mail.example.com">>}),
     TlsOpts = list_opt(tls_options, Opts),
     ?assertEqual(verify_peer, proplists:get_value(verify, TlsOpts)).
@@ -96,7 +95,7 @@ smtp_opts_caller_override_respected_test() ->
         relay => <<"mail.example.com">>, tls => always, tls_options => Override
     }),
     ?assertEqual(
-        [{server_name_indication, "mail.example.com"} | Override],
+        [{server_name_indication, "mail.example.com"}, {verify, verify_none}, {depth, 3}],
         proplists:get_value(tls_options, Opts)
     ).
 
@@ -112,7 +111,8 @@ smtp_opts_caller_sni_respected_test() ->
         tls_options => [{server_name_indication, "relay.internal"}]
     }),
     ?assertEqual(
-        [{server_name_indication, "relay.internal"}], proplists:get_value(tls_options, Opts)
+        [{server_name_indication, "relay.internal"}, {depth, 3}],
+        proplists:get_value(tls_options, Opts)
     ).
 
 smtp_opts_ip_relay_has_no_sni_test() ->
@@ -163,6 +163,65 @@ smtp_opts_no_mx_lookups_test() ->
         relay => ~"mail.example.com", no_mx_lookups => true
     }),
     ?assertEqual(true, proplists:get_value(no_mx_lookups, Direct)).
+
+smtp_opts_caller_depth_respected_test() ->
+    Opts = hikyaku_adapter_smtp:build_smtp_opts(#{
+        relay => ~"mail.example.com", tls => always, tls_options => [{depth, 5}]
+    }),
+    ?assertEqual(5, proplists:get_value(depth, list_opt(tls_options, Opts))).
+
+smtp_opts_ip_relay_skips_mx_lookups_test_() ->
+    [
+        ?_assertEqual(
+            true,
+            proplists:get_value(
+                no_mx_lookups, hikyaku_adapter_smtp:build_smtp_opts(#{relay => Relay})
+            )
+        )
+     || Relay <- [~"10.0.0.5", ~"::1"]
+    ].
+
+smtp_opts_sni_disabled_skips_mx_lookups_test() ->
+    Opts = hikyaku_adapter_smtp:build_smtp_opts(#{
+        relay => ~"mail.example.com",
+        tls_options => [{verify, verify_peer}, {server_name_indication, disable}]
+    }),
+    ?assertEqual(true, proplists:get_value(no_mx_lookups, Opts)).
+
+smtp_opts_no_credentials_require_tls_test() ->
+    Opts = hikyaku_adapter_smtp:build_smtp_opts(#{relay => ~"mail.example.com"}),
+    ?assertEqual(always, proplists:get_value(tls, Opts)).
+
+smtp_opts_loopback_relay_tls_if_available_test_() ->
+    [
+        ?_assertEqual(
+            if_available,
+            proplists:get_value(tls, hikyaku_adapter_smtp:build_smtp_opts(#{relay => Relay}))
+        )
+     || Relay <- [~"localhost", ~"LOCALHOST", ~"127.0.0.1", ~"127.1.2.3", ~"::1"]
+    ].
+
+smtp_opts_loopback_relay_with_credentials_require_tls_test() ->
+    Opts = hikyaku_adapter_smtp:build_smtp_opts(#{
+        relay => ~"localhost", username => ~"user", password => ~"secret"
+    }),
+    ?assertEqual(always, proplists:get_value(tls, Opts)).
+
+message_id_does_not_leak_host_name_test() ->
+    Encoded = mimemail:encode(
+        hikyaku_adapter_smtp:build_mimemail(build_email(~"text", undefined))
+    ),
+    Host = list_to_binary(smtp_util:guess_FQDN()),
+    ?assertEqual(nomatch, binary:match(Encoded, <<"@", Host/binary>>)),
+    ?assertMatch(
+        {match, _}, re:run(Encoded, ~"\\r\\nMessage-ID: <[0-9a-f]{32}@example\\.com>\\r\\n")
+    ).
+
+message_id_from_caller_kept_test() ->
+    Email = hikyaku_email:header(build_email(~"text", undefined), ~"Message-ID", ~"<id@x.test>"),
+    Encoded = mimemail:encode(hikyaku_adapter_smtp:build_mimemail(Email)),
+    ?assertMatch({match, [_]}, re:run(Encoded, ~"Message-ID:", [global])),
+    ?assertNotEqual(nomatch, binary:match(Encoded, ~"Message-ID: <id@x.test>")).
 
 %%% Helpers
 
