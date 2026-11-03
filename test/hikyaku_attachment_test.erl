@@ -75,7 +75,14 @@ rejects_invalid_content_type_test_() ->
         )
      || CT <- [
             ~"text/plain\r\nX-CT: 1",
-            ~"text/html; charset=x",
+            ~"text/plain; charset=utf-8\r\nX-CT: 1",
+            <<"text/plain; name=\"a\r\nX-CT: 1\"">>,
+            <<"text/plain; name=\"a\tb\"">>,
+            ~"text/plain;",
+            ~"text/plain; charset=",
+            ~"text/plain; =utf-8",
+            ~"text/plain; charset",
+            <<"text/plain; name=\"unterminated">>,
             ~"text",
             ~"text/",
             ~"/plain",
@@ -89,7 +96,16 @@ accepts_token_content_types_test_() ->
             CT,
             (hikyaku_attachment:from_data(~"a.bin", ~"d", #{content_type => CT}))#hikyaku_attachment.content_type
         )
-     || CT <- [~"application/vnd.ms-excel", ~"image/svg+xml", ~"application/x-custom"]
+     || CT <- [
+            ~"application/vnd.ms-excel",
+            ~"image/svg+xml",
+            ~"application/x-custom",
+            ~"text/plain; charset=utf-8",
+            ~"text/csv; charset=utf-8; header=present",
+            ~"text/plain;charset=utf-8",
+            <<"application/octet-stream; name=\"Q3 report; final.bin\"">>,
+            <<"application/octet-stream; name=\"say \\\"hi\\\"\"">>
+        ]
     ].
 
 rejects_control_characters_in_filename_test_() ->

@@ -60,6 +60,32 @@ encoded_attachment_keeps_filename_and_base64_test() ->
     Encoded = mimemail:encode(hikyaku_adapter_smtp:build_mimemail(Email)),
     assert_attachment_part(Encoded, ~"attachment", ~"report.pdf", Data).
 
+encoded_attachment_keeps_content_type_params_test() ->
+    Att = hikyaku_attachment:from_data(~"data.csv", ~"a,b", #{
+        content_type => ~"text/csv; Charset=utf-8; header=present"
+    }),
+    Email = hikyaku_email:attachment(build_email(~"text", undefined), Att),
+    Encoded = mimemail:encode(hikyaku_adapter_smtp:build_mimemail(Email)),
+    ?assertMatch(
+        {match, _},
+        re:run(Encoded, ~"Content-Type: text/csv;\\s+charset=utf-8;\\s+header=present\\r\\n")
+    ),
+    ?assertMatch({match, [_]}, re:run(Encoded, ~"charset=", [global, caseless])).
+
+encoded_attachment_requotes_quoted_params_test() ->
+    Att = hikyaku_attachment:from_data(~"r.bin", ~"data", #{
+        content_type => <<"application/octet-stream; name=\"Q3 \\\"final\\\" v2.bin\"">>
+    }),
+    Email = hikyaku_email:attachment(build_email(~"text", undefined), Att),
+    Encoded = mimemail:encode(hikyaku_adapter_smtp:build_mimemail(Email)),
+    ?assertNotEqual(
+        nomatch,
+        binary:match(
+            Encoded,
+            <<"Content-Type: application/octet-stream;\r\n\tname=\"Q3 \\\"final\\\" v2.bin\"\r\n">>
+        )
+    ).
+
 encoded_inline_attachment_keeps_content_id_test() ->
     Path = list_to_binary(?FILE),
     Att = (hikyaku_attachment:inline(~"logo", Path))#hikyaku_attachment{

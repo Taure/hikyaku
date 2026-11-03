@@ -2,8 +2,10 @@
 
 -include("hikyaku.hrl").
 
+-define(TOKEN, "[!#$%&'*+.^_`|~0-9A-Za-z-]+").
+-define(QUOTED_STRING, "\"(?:[^\"\\\\\\x00-\\x1f\\x7f]|\\\\[^\\x00-\\x1f\\x7f])*\"").
 -define(CONTENT_TYPE_RE,
-    ~"\\A[!#$%&'*+.^_`|~0-9A-Za-z-]+/[!#$%&'*+.^_`|~0-9A-Za-z-]+\\z"
+    "\\A" ?TOKEN "/" ?TOKEN "(?:[ \\t]*;[ \\t]*" ?TOKEN "=(?:" ?TOKEN "|" ?QUOTED_STRING "))*\\z"
 ).
 
 -export([
@@ -59,9 +61,10 @@ inline(Cid, Path) when is_binary(Cid), is_binary(Path) ->
 -doc """
 Checks that an attachment is safe to put into MIME and form-data headers.
 
-The content type must be a bare `type/subtype` made of RFC 9110 token
-characters (no parameters), the filename must not contain control
-characters, and a content id must be printable ASCII without `<` or `>`.
+The content type must be `type/subtype` made of RFC 9110 token
+characters, optionally followed by `; name=value` parameters whose value
+is a token or a quoted string without control characters (RFC 2045,
+RFC 9110). The filename must not contain control characters, and a content id must be printable ASCII without `<` or `>`.
 Returns the attachment, or raises `{invalid_attachment, Field, Value}`.
 All builders in this module and `hikyaku_email:attachment/2` call it.
 """.

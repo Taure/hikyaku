@@ -73,7 +73,7 @@ Email7 = hikyaku_email:attachment(Email6, Logo).
 
 `from_path/2` and `from_data/3` accept an options map: `#{content_type => binary(), filename => binary()}`.
 
-The content type must be a bare `type/subtype` (no parameters), the filename must not contain control characters, and an inline content id must be printable ASCII without `<` or `>`. Anything else raises `{invalid_attachment, Field, Value}`, both from the builders and from `hikyaku_email:attachment/2`.
+The content type must be `type/subtype`, optionally with `; name=value` parameters whose value is a token or a quoted string without control characters (for example `text/csv; charset=utf-8; header=present`); the filename must not contain control characters, and an inline content id must be printable ASCII without `<` or `>`. Anything else raises `{invalid_attachment, Field, Value}`, both from the builders and from `hikyaku_email:attachment/2`.
 
 ### Reading an Email
 
