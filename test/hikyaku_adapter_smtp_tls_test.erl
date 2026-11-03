@@ -70,19 +70,45 @@ ssl_untrusted(Pki) ->
         ?assertNot(auth_seen())
     end).
 
-ip_relay_mx_test_() ->
-    {setup,
+mx_lookup_test_() ->
+    {foreach,
         fun() ->
             {ok, _} = application:ensure_all_started(ssl),
             hikyaku_smtp_test_server:start_dns()
         end,
-        fun hikyaku_smtp_test_server:stop_dns/1, fun(Dns) ->
-            [
+        fun hikyaku_smtp_test_server:stop_dns/1, [
+            fun(Dns) ->
+                {"a domain relay is reached through its MX hosts by default", fun() ->
+                    domain_relay_follows_mx(Dns)
+                end}
+            end,
+            fun(Dns) ->
+                {"no_mx_lookups dials a domain relay directly", fun() ->
+                    domain_relay_no_mx_lookups(Dns)
+                end}
+            end,
+            fun(Dns) ->
                 {"an IP relay is dialled directly, never through an MX lookup", fun() ->
                     ip_relay_ignores_mx(Dns)
                 end}
-            ]
-        end}.
+            end
+        ]}.
+
+domain_relay_follows_mx(Dns) ->
+    with_server(plain, hikyaku_smtp_test_server:pki(), fun(Port) ->
+        Config = #{relay => ~"mx-only.hikyaku.test", port => Port, tls => never},
+        ?assertMatch({ok, #{status := sent}}, hikyaku_adapter_smtp:deliver(email(), Config)),
+        ?assert(
+            lists:member({"mx-only.hikyaku.test", mx}, hikyaku_smtp_test_server:dns_queries(Dns))
+        )
+    end).
+
+domain_relay_no_mx_lookups(Dns) ->
+    with_server(plain, hikyaku_smtp_test_server:pki(), fun(Port) ->
+        Config = #{relay => ~"localhost", port => Port, tls => never, no_mx_lookups => true},
+        ?assertMatch({ok, #{status := sent}}, hikyaku_adapter_smtp:deliver(email(), Config)),
+        ?assertEqual([], [Q || {_, mx} = Q <- hikyaku_smtp_test_server:dns_queries(Dns)])
+    end).
 
 ip_relay_ignores_mx(Dns) ->
     #{cacerts := CaCerts} = Pki = hikyaku_smtp_test_server:pki(),
