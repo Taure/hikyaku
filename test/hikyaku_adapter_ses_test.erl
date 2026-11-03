@@ -87,6 +87,18 @@ deliver_raw_attachment_keeps_filename_and_base64_test() ->
     ),
     ?assertEqual(Data, Body).
 
+deliver_with_headers_uses_raw_mime_test() ->
+    Email = hikyaku_email:header(build_email(), ~"X-Campaign", ~"welcome"),
+    {ok, _} = hikyaku_adapter_ses:deliver(Email, base_config()),
+    Raw = base64:decode(raw_data(persistent_term:get(ses_test_body))),
+    {_, _, Headers, _, _} = mimemail:decode(Raw),
+    ?assertEqual(~"welcome", proplists:get_value(~"X-Campaign", Headers)).
+
+deliver_without_headers_uses_simple_content_test() ->
+    {ok, _} = hikyaku_adapter_ses:deliver(build_email(), base_config()),
+    Content = maps:get(~"Content", json:decode(persistent_term:get(ses_test_body))),
+    ?assert(maps:is_key(~"Simple", Content)).
+
 deliver_with_reply_to_test() ->
     Email = hikyaku_email:reply_to(build_email(), <<"reply@x.com">>),
     Config = base_config(),

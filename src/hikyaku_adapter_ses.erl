@@ -43,10 +43,12 @@ deliver(Email, Config) ->
 
 %%% Internal
 
-build_payload(#hikyaku_email{attachments = Attachments} = Email) when Attachments =/= [] ->
-    build_raw_payload(Email);
+build_payload(#hikyaku_email{attachments = [], headers = Headers} = Email) when
+    map_size(Headers) =:= 0
+->
+    build_simple_payload(Email);
 build_payload(Email) ->
-    build_simple_payload(Email).
+    build_raw_payload(Email).
 
 build_simple_payload(#hikyaku_email{
     from = From,
