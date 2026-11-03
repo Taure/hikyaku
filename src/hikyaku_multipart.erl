@@ -30,7 +30,7 @@ encode_parts(Parts, Boundary) ->
 encode_part({Name, Value}, Boundary) ->
     [
         <<"--", Boundary/binary, "\r\n">>,
-        <<"Content-Disposition: form-data; name=\"", Name/binary, "\"\r\n">>,
+        <<"Content-Disposition: form-data; name=\"", (quote(Name))/binary, "\"\r\n">>,
         <<"\r\n">>,
         Value,
         <<"\r\n">>
@@ -38,10 +38,23 @@ encode_part({Name, Value}, Boundary) ->
 encode_part({file, Name, Filename, ContentType, Data}, Boundary) ->
     [
         <<"--", Boundary/binary, "\r\n">>,
-        <<"Content-Disposition: form-data; name=\"", Name/binary, "\"; filename=\"",
-            Filename/binary, "\"\r\n">>,
-        <<"Content-Type: ", ContentType/binary, "\r\n">>,
+        <<"Content-Disposition: form-data; name=\"", (quote(Name))/binary, "\"; filename=\"",
+            (quote(Filename))/binary, "\"\r\n">>,
+        <<"Content-Type: ", (header_value(ContentType))/binary, "\r\n">>,
         <<"\r\n">>,
         Data,
         <<"\r\n">>
     ].
+
+quote(Value) ->
+    <<<<(escape(C))/binary>> || <<C>> <= header_value(Value)>>.
+
+escape($") -> <<$\\, $">>;
+escape($\\) -> <<$\\, $\\>>;
+escape(C) -> <<C>>.
+
+header_value(Value) ->
+    case binary:match(Value, [<<$\r>>, <<$\n>>]) of
+        nomatch -> Value;
+        _ -> error({invalid_form_part, Value})
+    end.
