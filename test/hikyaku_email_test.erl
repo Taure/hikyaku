@@ -198,6 +198,22 @@ header_accepts_message_id_and_list_unsubscribe_test() ->
         hikyaku_email:headers(E1)
     ).
 
+address_rejects_control_characters_test_() ->
+    New = hikyaku_email:new(),
+    [
+        ?_assertError(
+            {invalid_address, _}, hikyaku_email:from(New, {~"Bob\r\nX-Name: 1", ~"b@x.com"})
+        ),
+        ?_assertError({invalid_address, _}, hikyaku_email:to(New, ~"c@example.com\r\nX-To: 1")),
+        ?_assertError({invalid_address, _}, hikyaku_email:cc(New, ~"a@x.com, b@y.com")),
+        ?_assertError({invalid_address, _}, hikyaku_email:bcc(New, ~"<a@x.com>")),
+        ?_assertError({invalid_address, _}, hikyaku_email:put_to(New, [~"ok@x.com", ~"a b@x.com"])),
+        ?_assertError(
+            {invalid_address, _},
+            hikyaku_email:reply_to(New, #hikyaku_address{address = ~"r@x.com\n"})
+        )
+    ].
+
 attachment_rejects_invalid_record_test() ->
     Att = (hikyaku_attachment:from_data(~"a.txt", ~"data"))#hikyaku_attachment{
         content_type = ~"text/plain\r\nX-CT: 1"

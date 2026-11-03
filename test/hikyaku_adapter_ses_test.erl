@@ -100,6 +100,20 @@ deliver_without_headers_uses_simple_content_test() ->
     Content = maps:get(~"Content", decoded_body()),
     ?assert(maps:is_key(~"Simple", Content)).
 
+deliver_quotes_display_names_test() ->
+    Email = hikyaku_email:to(
+        hikyaku_email:from(
+            hikyaku_email:subject(hikyaku_email:new(), ~"Hi"), {
+                ~"Bob <ceo@bank.com>, x", ~"b@x.com"
+            }
+        ),
+        {~"Smith, John", ~"j@x.com"}
+    ),
+    {ok, _} = hikyaku_adapter_ses:deliver(Email, base_config()),
+    #{~"FromEmailAddress" := From, ~"Destination" := #{~"ToAddresses" := To}} = decoded_body(),
+    ?assertEqual(~"\"Bob <ceo@bank.com>, x\" <b@x.com>", From),
+    ?assertEqual([~"\"Smith, John\" <j@x.com>"], To).
+
 deliver_with_reply_to_test() ->
     Email = hikyaku_email:reply_to(build_email(), <<"reply@x.com">>),
     Config = base_config(),

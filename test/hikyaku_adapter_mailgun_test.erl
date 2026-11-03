@@ -85,6 +85,16 @@ deliver_with_reply_to_test() ->
     ?assertNotEqual(nomatch, binary:match(Body, <<"name=\"h:Reply-To\"">>)),
     ?assertNotEqual(nomatch, binary:match(Body, <<"reply@x.com">>)).
 
+deliver_quotes_display_names_test() ->
+    Email = hikyaku_email:from(build_email(), {~"Bob <ceo@bank.com>, x", ~"b@x.com"}),
+    {ok, _} = hikyaku_adapter_mailgun:deliver(Email, base_config()),
+    Body = persistent_term:get(mailgun_test_body),
+    true = is_binary(Body),
+    ?assertNotEqual(
+        nomatch,
+        binary:match(Body, ~"name=\"from\"\r\n\r\n\"Bob <ceo@bank.com>, x\" <b@x.com>\r\n")
+    ).
+
 deliver_eu_region_test() ->
     Email = build_email(),
     Config = (base_config())#{base_url => <<"https://api.eu.mailgun.net">>},

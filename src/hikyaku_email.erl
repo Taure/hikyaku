@@ -197,9 +197,20 @@ provider_options(#hikyaku_email{provider_options = Opts}) ->
     Opts.
 
 -spec normalize_address(address_input()) -> #hikyaku_address{}.
-normalize_address(#hikyaku_address{} = Addr) ->
+normalize_address(#hikyaku_address{name = Name, address = Address} = Addr) ->
+    validate_address(Name, Address),
     Addr;
 normalize_address({Name, Address}) when is_binary(Name), is_binary(Address) ->
+    validate_address(Name, Address),
     #hikyaku_address{name = Name, address = Address};
 normalize_address(Address) when is_binary(Address) ->
+    validate_address(undefined, Address),
     #hikyaku_address{address = Address}.
+
+validate_address(Name, Address) ->
+    ValidName = Name =:= undefined orelse re:run(Name, ~"[\\x00-\\x1f\\x7f]") =:= nomatch,
+    ValidAddress = re:run(Address, ~"\\A[^\\x00-\\x20\\x7f<>,]+\\z") =/= nomatch,
+    case ValidName andalso ValidAddress of
+        true -> ok;
+        false -> error({invalid_address, {Name, Address}})
+    end.

@@ -145,19 +145,19 @@ build_mimemail(Email) ->
         attachments = Attachments
     } = Email,
     Headers0 = [
-        {<<"From">>, format_address(From)},
-        {<<"To">>, format_address_list(To)},
+        {<<"From">>, hikyaku_address:format(From)},
+        {<<"To">>, hikyaku_address:format_list(To)},
         {<<"Subject">>, Subject}
     ],
     Headers1 =
         case Cc of
             [] -> Headers0;
-            _ -> Headers0 ++ [{<<"Cc">>, format_address_list(Cc)}]
+            _ -> Headers0 ++ [{<<"Cc">>, hikyaku_address:format_list(Cc)}]
         end,
     Headers2 =
         case ReplyTo of
             undefined -> Headers1;
-            _ -> Headers1 ++ [{<<"Reply-To">>, format_address(ReplyTo)}]
+            _ -> Headers1 ++ [{<<"Reply-To">>, hikyaku_address:format(ReplyTo)}]
         end,
     Headers3 = Headers2 ++ maps:fold(fun(K, V, Acc) -> [{K, V} | Acc] end, [], CustomHeaders),
     Headers4 =
@@ -247,12 +247,3 @@ build_attachment_part(#hikyaku_attachment{
 read_file(Path) ->
     {ok, Data} = file:read_file(Path),
     Data.
-
-format_address(#hikyaku_address{name = undefined, address = Addr}) ->
-    Addr;
-format_address(#hikyaku_address{name = Name, address = Addr}) ->
-    <<Name/binary, " <", Addr/binary, ">">>.
-
-format_address_list(Addrs) ->
-    Formatted = [format_address(A) || A <- Addrs],
-    iolist_to_binary(lists:join(<<", ">>, Formatted)).

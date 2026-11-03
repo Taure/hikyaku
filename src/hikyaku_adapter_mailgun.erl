@@ -45,19 +45,19 @@ build_parts(#hikyaku_email{
     attachments = Attachments
 }) ->
     Parts0 = [
-        {<<"from">>, format_address(From)},
-        {<<"to">>, format_address_list(To)},
+        {<<"from">>, hikyaku_address:format(From)},
+        {<<"to">>, hikyaku_address:format_list(To)},
         {<<"subject">>, Subject}
     ],
     Parts1 =
         case Cc of
             [] -> Parts0;
-            _ -> Parts0 ++ [{<<"cc">>, format_address_list(Cc)}]
+            _ -> Parts0 ++ [{<<"cc">>, hikyaku_address:format_list(Cc)}]
         end,
     Parts2 =
         case Bcc of
             [] -> Parts1;
-            _ -> Parts1 ++ [{<<"bcc">>, format_address_list(Bcc)}]
+            _ -> Parts1 ++ [{<<"bcc">>, hikyaku_address:format_list(Bcc)}]
         end,
     Parts3 =
         case Text of
@@ -72,7 +72,7 @@ build_parts(#hikyaku_email{
     Parts5 =
         case ReplyTo of
             undefined -> Parts4;
-            _ -> Parts4 ++ [{<<"h:Reply-To">>, format_address(ReplyTo)}]
+            _ -> Parts4 ++ [{<<"h:Reply-To">>, hikyaku_address:format(ReplyTo)}]
         end,
     Parts6 = maps:fold(
         fun(K, V, Acc) ->
@@ -107,12 +107,3 @@ build_attachment_part(#hikyaku_attachment{
             attachment -> <<"attachment">>
         end,
     {file, FieldName, Filename, ContentType, Data}.
-
-format_address(#hikyaku_address{name = undefined, address = Addr}) ->
-    Addr;
-format_address(#hikyaku_address{name = Name, address = Addr}) ->
-    <<Name/binary, " <", Addr/binary, ">">>.
-
-format_address_list(Addrs) ->
-    Formatted = [format_address(A) || A <- Addrs],
-    iolist_to_binary(lists:join(<<", ">>, Formatted)).

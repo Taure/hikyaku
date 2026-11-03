@@ -223,6 +223,15 @@ message_id_from_caller_kept_test() ->
     ?assertMatch({match, [_]}, re:run(Encoded, ~"Message-ID:", [global])),
     ?assertNotEqual(nomatch, binary:match(Encoded, ~"Message-ID: <id@x.test>")).
 
+display_name_with_specials_is_quoted_test() ->
+    Email = hikyaku_email:from(
+        build_email(~"text", undefined), {~"Bob <ceo@bank.com>, x", ~"bob@example.com"}
+    ),
+    Encoded = mimemail:encode(hikyaku_adapter_smtp:build_mimemail(Email)),
+    ?assertNotEqual(
+        nomatch, binary:match(Encoded, ~"From: \"Bob <ceo@bank.com>, x\" <bob@example.com>\r\n")
+    ).
+
 %%% Helpers
 
 list_opt(Key, Opts) ->
