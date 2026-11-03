@@ -243,6 +243,15 @@ message_id_does_not_leak_host_name_test() ->
         {match, _}, re:run(Encoded, ~"\\r\\nMessage-ID: <[0-9a-f]{32}@example\\.com>\\r\\n")
     ).
 
+message_id_for_idn_sender_test() ->
+    Email = hikyaku_email:from(
+        build_email(~"text", undefined), ~"bob@bücher.de"
+    ),
+    Encoded = mimemail:encode(hikyaku_adapter_smtp:build_mimemail(Email)),
+    ?assertMatch(
+        {match, _}, re:run(Encoded, ~"\\r\\nMessage-ID: <[0-9a-f]{32}@hikyaku\\.invalid>\\r\\n")
+    ).
+
 message_id_from_caller_kept_test() ->
     Email = hikyaku_email:header(build_email(~"text", undefined), ~"Message-ID", ~"<id@x.test>"),
     Encoded = mimemail:encode(hikyaku_adapter_smtp:build_mimemail(Email)),

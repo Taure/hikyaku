@@ -172,12 +172,19 @@ build_mimemail(Email) ->
 %% sending machine's name to every recipient.
 message_id(#hikyaku_address{address = Address}) ->
     Random = binary:encode_hex(crypto:strong_rand_bytes(16), lowercase),
-    <<"<", Random/binary, "@", (domain(Address))/binary, ">">>.
+    <<"<", Random/binary, "@", (message_id_domain(Address))/binary, ">">>.
 
-domain(Address) ->
+%% A non-ASCII (IDN) domain would be RFC 2047-encoded by mimemail, which
+%% is not a valid msg-id.
+message_id_domain(Address) ->
     case binary:split(Address, ~"@") of
-        [_, Rest] -> domain(Rest);
-        [Domain] -> Domain
+        [_, Rest] ->
+            message_id_domain(Rest);
+        [Domain] ->
+            case re:run(Domain, ~"\\A[A-Za-z0-9.-]+\\z") of
+                {match, _} -> Domain;
+                nomatch -> ~"hikyaku.invalid"
+            end
     end.
 
 build_body(Text, Html, Attachments) when Attachments =/= [] ->
