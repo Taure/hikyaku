@@ -273,6 +273,26 @@ empty_display_name_is_no_name_test() ->
     Email = hikyaku_email:from(hikyaku_email:new(), {<<>>, ~"a@x.com"}),
     ?assertEqual(#hikyaku_address{address = ~"a@x.com"}, hikyaku_email:from(Email)).
 
+header_rejects_control_characters_test_() ->
+    [
+        ?_assertError(
+            {invalid_header, ~"X-A"}, hikyaku_email:header(hikyaku_email:new(), ~"X-A", V)
+        )
+     || V <- [<<"a", 0, "b">>, <<"a", 27, "b">>, <<"a", 127, "b">>]
+    ].
+
+header_accepts_tab_in_value_test() ->
+    Email = hikyaku_email:header(hikyaku_email:new(), ~"X-A", ~"a\tb"),
+    ?assertEqual(#{~"X-A" => ~"a\tb"}, hikyaku_email:headers(Email)).
+
+header_rejects_provider_reserved_names_test_() ->
+    [
+        ?_assertError(
+            {reserved_header, Name}, hikyaku_email:header(hikyaku_email:new(), Name, ~"v")
+        )
+     || Name <- [~"X-SG-ID", ~"x-sg-eid", ~"Received", ~"DKIM-Signature"]
+    ].
+
 attachment_rejects_invalid_record_test() ->
     Att = (hikyaku_attachment:from_data(~"a.txt", ~"data"))#hikyaku_attachment{
         content_type = ~"text/plain\r\nX-CT: 1"

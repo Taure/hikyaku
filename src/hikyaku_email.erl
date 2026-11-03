@@ -2,6 +2,10 @@
 
 -include("hikyaku.hrl").
 
+-define(HEADER_NAME_RE, ~"\\A[!-9;-~]{1,76}\\z").
+%% Any control character except horizontal tab.
+-define(HEADER_VALUE_FORBIDDEN_RE, ~"[\\x00-\\x08\\x0a-\\x1f\\x7f]").
+%% Derived from other fields, or set by SendGrid itself.
 -define(RESERVED_HEADERS, [
     ~"from",
     ~"to",
@@ -11,7 +15,11 @@
     ~"subject",
     ~"content-type",
     ~"mime-version",
-    ~"content-transfer-encoding"
+    ~"content-transfer-encoding",
+    ~"x-sg-id",
+    ~"x-sg-eid",
+    ~"received",
+    ~"dkim-signature"
 ]).
 
 -export([
@@ -108,19 +116,20 @@ attachment(Email = #hikyaku_email{attachments = Current}, Att = #hikyaku_attachm
 Sets a custom header.
 
 The name must be 1 to 76 printable ASCII characters without `:`, and the
-value must not contain CR or LF; otherwise `{invalid_header, Name}` is
-raised. Headers that hikyaku sets from other fields (`From`, `To`, `Cc`,
-`Bcc`, `Reply-To`, `Subject`, `Content-Type`, `MIME-Version`,
-`Content-Transfer-Encoding`) raise `{reserved_header, Name}`: use the
-matching setter instead.
+value must not contain control characters other than tab; otherwise
+`{invalid_header, Name}` is raised. Headers that hikyaku sets from other
+fields (`From`, `To`, `Cc`, `Bcc`, `Reply-To`, `Subject`, `Content-Type`,
+`MIME-Version`, `Content-Transfer-Encoding`) or that providers set
+themselves (`Received`, `DKIM-Signature`, SendGrid's `X-SG-ID` and
+`X-SG-EID`) raise `{reserved_header, Name}`.
 """.
 -spec header(#hikyaku_email{}, binary(), binary()) -> #hikyaku_email{}.
 header(Email = #hikyaku_email{headers = Headers}, Key, Value) when
     is_binary(Key), is_binary(Value)
 ->
     case
-        re:run(Key, ~"\\A[!-9;-~]{1,76}\\z") =/= nomatch andalso
-            re:run(Value, ~"[\\r\\n]") =:= nomatch
+        re:run(Key, ?HEADER_NAME_RE) =/= nomatch andalso
+            re:run(Value, ?HEADER_VALUE_FORBIDDEN_RE) =:= nomatch
     of
         false -> error({invalid_header, Key});
         true -> ok
