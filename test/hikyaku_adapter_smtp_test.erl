@@ -77,7 +77,74 @@ smtp_opts_caller_override_respected_test() ->
     Opts = hikyaku_adapter_smtp:build_smtp_opts(#{
         relay => <<"mail.example.com">>, tls => always, tls_options => Override
     }),
-    ?assertEqual(Override, proplists:get_value(tls_options, Opts)).
+    ?assertEqual(
+        [{server_name_indication, "mail.example.com"} | Override],
+        proplists:get_value(tls_options, Opts)
+    ).
+
+smtp_opts_pins_relay_as_sni_test() ->
+    Opts = hikyaku_adapter_smtp:build_smtp_opts(#{relay => ~"mail.example.com", tls => always}),
+    TlsOpts = proplists:get_value(tls_options, Opts),
+    ?assertEqual("mail.example.com", proplists:get_value(server_name_indication, TlsOpts)).
+
+smtp_opts_caller_sni_respected_test() ->
+    Opts = hikyaku_adapter_smtp:build_smtp_opts(#{
+        relay => ~"mail.example.com",
+        tls => always,
+        tls_options => [{server_name_indication, "relay.internal"}]
+    }),
+    ?assertEqual(
+        [{server_name_indication, "relay.internal"}], proplists:get_value(tls_options, Opts)
+    ).
+
+smtp_opts_ip_relay_has_no_sni_test() ->
+    Opts = hikyaku_adapter_smtp:build_smtp_opts(#{relay => ~"192.0.2.10", tls => always}),
+    TlsOpts = proplists:get_value(tls_options, Opts),
+    ?assertNot(proplists:is_defined(server_name_indication, TlsOpts)),
+    ?assertEqual(verify_peer, proplists:get_value(verify, TlsOpts)).
+
+smtp_opts_ssl_verifies_peer_test() ->
+    Opts = hikyaku_adapter_smtp:build_smtp_opts(#{
+        relay => ~"mail.example.com", port => 465, ssl => true, tls => never
+    }),
+    SockOpts = proplists:get_value(sockopts, Opts),
+    ?assertEqual(verify_peer, proplists:get_value(verify, SockOpts)),
+    ?assertNotEqual(undefined, proplists:get_value(cacerts, SockOpts)),
+    ?assertEqual("mail.example.com", proplists:get_value(server_name_indication, SockOpts)),
+    ?assertEqual(undefined, proplists:get_value(tls_options, Opts)).
+
+smtp_opts_plain_has_no_sockopts_test() ->
+    Opts = hikyaku_adapter_smtp:build_smtp_opts(#{relay => ~"mail.example.com"}),
+    ?assertEqual(undefined, proplists:get_value(sockopts, Opts)).
+
+smtp_opts_credentials_require_tls_test() ->
+    Opts = hikyaku_adapter_smtp:build_smtp_opts(#{
+        relay => ~"mail.example.com", username => ~"user", password => ~"secret"
+    }),
+    ?assertEqual(always, proplists:get_value(tls, Opts)).
+
+smtp_opts_credentials_explicit_tls_respected_test() ->
+    Opts = hikyaku_adapter_smtp:build_smtp_opts(#{
+        relay => ~"mail.example.com",
+        username => ~"user",
+        password => ~"secret",
+        tls => if_available
+    }),
+    ?assertEqual(if_available, proplists:get_value(tls, Opts)).
+
+smtp_opts_credentials_over_ssl_keep_default_tls_test() ->
+    Opts = hikyaku_adapter_smtp:build_smtp_opts(#{
+        relay => ~"mail.example.com", ssl => true, username => ~"user", password => ~"secret"
+    }),
+    ?assertEqual(if_available, proplists:get_value(tls, Opts)).
+
+smtp_opts_no_mx_lookups_test() ->
+    Default = hikyaku_adapter_smtp:build_smtp_opts(#{relay => ~"mail.example.com"}),
+    ?assertEqual(undefined, proplists:get_value(no_mx_lookups, Default)),
+    Direct = hikyaku_adapter_smtp:build_smtp_opts(#{
+        relay => ~"mail.example.com", no_mx_lookups => true
+    }),
+    ?assertEqual(true, proplists:get_value(no_mx_lookups, Direct)).
 
 %%% Helpers
 

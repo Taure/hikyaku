@@ -32,12 +32,13 @@ collect_recipients(#hikyaku_email{to = To, cc = Cc, bcc = Bcc}) ->
     [A#hikyaku_address.address || A <- To ++ Cc ++ Bcc].
 
 build_smtp_opts(Config) ->
-    Relay = maps:get(relay, Config),
+    Relay = binary_to_list(maps:get(relay, Config)),
     Port = maps:get(port, Config, 587),
     Username = maps:get(username, Config, undefined),
     Password = maps:get(password, Config, undefined),
+    Ssl = maps:get(ssl, Config, false),
     Opts0 = [
-        {relay, binary_to_list(Relay)},
+        {relay, Relay},
         {port, Port}
     ],
     Opts1 =
@@ -48,29 +49,47 @@ build_smtp_opts(Config) ->
                 Opts0 ++
                     [{username, binary_to_list(Username)}, {password, binary_to_list(Password)}]
         end,
+    %% gen_smtp hands `tls_options` only to STARTTLS; an implicit TLS (ssl)
+    %% connection takes its ssl options from `sockopts`.
     Opts2 =
-        case maps:get(ssl, Config, false) of
-            true -> Opts1 ++ [{ssl, true}];
+        case Ssl of
+            true -> Opts1 ++ [{ssl, true}, {sockopts, tls_options(Relay, Config)}];
             false -> Opts1
         end,
-    Tls = maps:get(tls, Config, if_available),
+    Tls = maps:get(tls, Config, default_tls(Ssl, Username)),
     Opts3 =
         case Tls of
             always -> Opts2 ++ [{tls, always}];
             never -> Opts2 ++ [{tls, never}];
             if_available -> Opts2 ++ [{tls, if_available}]
         end,
-    %% When TLS is used at all, authenticate the relay's certificate. gen_smtp's
-    %% default tls_options are verify_none, so without this an on-path attacker
-    %% can present any cert, complete STARTTLS, and capture the SMTP AUTH
-    %% credentials. Callers can override via a `tls_options` config key.
-    case Tls =/= never orelse maps:get(ssl, Config, false) of
-        true -> Opts3 ++ [{tls_options, tls_options(Config)}];
-        false -> Opts3
+    Opts4 =
+        case Tls of
+            never -> Opts3;
+            _ -> Opts3 ++ [{tls_options, tls_options(Relay, Config)}]
+        end,
+    case maps:get(no_mx_lookups, Config, false) of
+        true -> Opts4 ++ [{no_mx_lookups, true}];
+        false -> Opts4
     end.
 
-tls_options(Config) ->
-    maps:get(tls_options, Config, default_tls_options()).
+%% With credentials configured, `if_available` would let an on-path attacker
+%% strip STARTTLS from the EHLO reply and read the AUTH exchange in clear.
+default_tls(false, Username) when Username =/= undefined -> always;
+default_tls(_Ssl, _Username) -> if_available.
+
+%% gen_smtp may dial an MX host or a resolved IP address rather than the relay
+%% name, and a STARTTLS upgrade has no host name at all, so the relay name is
+%% pinned as SNI and as the reference identity for certificate verification.
+tls_options(Relay, Config) ->
+    TlsOpts = maps:get(tls_options, Config, default_tls_options()),
+    case proplists:is_defined(server_name_indication, TlsOpts) orelse is_ip_address(Relay) of
+        true -> TlsOpts;
+        false -> [{server_name_indication, Relay} | TlsOpts]
+    end.
+
+is_ip_address(Host) ->
+    element(1, inet:parse_address(Host)) =:= ok.
 
 default_tls_options() ->
     [
