@@ -37,8 +37,6 @@ deliver(Email) ->
 ### Build & Send
 
 ```erlang
--include_lib("hikyaku/include/hikyaku.hrl").
-
 Email = hikyaku_email:new(),
 Email1 = hikyaku_email:from(Email, {<<"Alice">>, <<"alice@example.com">>}),
 Email2 = hikyaku_email:to(Email1, <<"bob@example.com">>),
@@ -71,16 +69,60 @@ Email7 = hikyaku_email:attachment(Email6, Logo).
 
 `from_path/2` and `from_data/3` accept an options map: `#{content_type => binary(), filename => binary()}`.
 
+### Reading an Email
+
+Each setter has a matching one-argument getter, so a built or delivered email can be read without including the record header:
+
+```erlang
+<<"Hello!">> = hikyaku_email:subject(Email5),
+<<"Hi Bob">> = hikyaku_email:text_body(Email5),
+[_Bob] = hikyaku_email:to(Email5).
+```
+
+Getters: `subject/1`, `from/1`, `to/1`, `cc/1`, `bcc/1`, `reply_to/1`, `text_body/1`, `html_body/1`, `attachments/1`, `headers/1`, `provider_options/1`. Addresses are returned as `#hikyaku_address{}` records and attachments as `#hikyaku_attachment{}` records (from `hikyaku/include/hikyaku.hrl`).
+
 ## Adapters
 
 | Adapter | Description | Config |
 |---|---|---|
-| `hikyaku_adapter_smtp` | SMTP via gen_smtp | `relay`, `port`, `username`, `password`, `ssl`, `tls` |
+| `hikyaku_adapter_smtp` | SMTP via gen_smtp | `relay`, `port`, `username`, `password`, `ssl`, `tls`, `tls_options`, `no_mx_lookups` |
 | `hikyaku_adapter_sendgrid` | SendGrid v3 API | `api_key`, `http_client` |
 | `hikyaku_adapter_mailgun` | Mailgun Messages API | `api_key`, `domain`, `base_url`, `http_client` |
 | `hikyaku_adapter_ses` | Amazon SES v2 API | `access_key`, `secret_key`, `region`, `http_client` |
 | `hikyaku_adapter_logger` | Logs emails via logger | `level` |
 | `hikyaku_adapter_test` | Sends to a process | `pid` |
+
+### SMTP
+
+```erlang
+config() ->
+    #{
+        adapter => hikyaku_adapter_smtp,
+        relay => <<"smtp.example.com">>,
+        port => 587,                      %% default 587; use 465 with ssl => true
+        username => <<"user@example.com">>,
+        password => <<"secret">>,
+        tls => always                     %% always | if_available | never
+    }.
+```
+
+- `tls` controls STARTTLS. It defaults to `always` when `username` is set and `ssl` is not, so credentials are never sent over an unencrypted connection, and to `if_available` otherwise.
+- `ssl => true` connects with implicit TLS (port 465) instead of STARTTLS.
+- Every TLS connection, STARTTLS or implicit, verifies the relay certificate against the OS trust store (`public_key:cacerts_get()`) and checks that it is valid for `relay`, which is also sent as SNI.
+- `tls_options` replaces the default ssl client options, for example to trust a private CA: `tls_options => [{verify, verify_peer}, {cacerts, MyCaCerts}]`. `relay` is still sent as SNI unless the list sets `server_name_indication`.
+- gen_smtp looks up MX records for `relay` and connects to those hosts if any exist. Set `no_mx_lookups => true` to always connect to `relay` itself.
+
+### SendGrid
+
+```erlang
+config() ->
+    #{
+        adapter => hikyaku_adapter_sendgrid,
+        api_key => <<"SG.xxx">>
+    }.
+```
+
+Attachments (including inline parts with a content id) and custom headers are sent through the v3 `mail/send` API.
 
 ### Mailgun
 
@@ -106,12 +148,11 @@ config() ->
     }.
 ```
 
-SES uses the v2 JSON API for simple emails and automatically falls back to raw MIME encoding when attachments are present. Authentication uses AWS Signature V4 — no external dependencies required beyond OTP `crypto`.
+SES uses the v2 JSON API for simple emails and automatically falls back to raw MIME encoding when attachments or custom headers are present. Authentication uses AWS Signature V4 — no external dependencies required beyond OTP `crypto`.
 
 ## Testing
 
 ```erlang
--include_lib("hikyaku/include/hikyaku.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
 -behaviour(hikyaku_mailer).
@@ -130,7 +171,7 @@ send_test() ->
     {ok, _} = hikyaku_mailer:deliver(?MODULE, Email),
     receive
         {hikyaku_email, Received} ->
-            ?assertEqual(<<"Test">>, Received#hikyaku_email.subject)
+            ?assertEqual(<<"Test">>, hikyaku_email:subject(Received))
     after 1000 ->
         error(timeout)
     end.
