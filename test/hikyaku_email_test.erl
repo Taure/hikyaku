@@ -119,3 +119,41 @@ full_pipeline_test() ->
     ?assertEqual(<<"alice@example.com">>, (Email#hikyaku_email.from)#hikyaku_address.address),
     ?assertEqual(1, length(Email#hikyaku_email.to)),
     ?assertEqual(<<"Hi Bob">>, Email#hikyaku_email.text_body).
+
+accessors_test() ->
+    Att = hikyaku_attachment:from_data(~"a.txt", ~"data"),
+    E0 = hikyaku_email:from(hikyaku_email:new(), {~"Alice", ~"alice@example.com"}),
+    E1 = hikyaku_email:to(hikyaku_email:to(E0, ~"bob@example.com"), ~"carol@example.com"),
+    E2 = hikyaku_email:bcc(hikyaku_email:cc(E1, ~"cc@example.com"), ~"bcc@example.com"),
+    E3 = hikyaku_email:subject(hikyaku_email:reply_to(E2, ~"reply@example.com"), ~"Subject"),
+    E4 = hikyaku_email:html_body(hikyaku_email:text_body(E3, ~"text"), ~"<b>html</b>"),
+    E5 = hikyaku_email:header(hikyaku_email:attachment(E4, Att), ~"X-Tag", ~"tag"),
+    Email = hikyaku_email:provider_option(E5, tag, ~"welcome"),
+    ?assertEqual(~"Subject", hikyaku_email:subject(Email)),
+    ?assertEqual(
+        #hikyaku_address{name = ~"Alice", address = ~"alice@example.com"},
+        hikyaku_email:from(Email)
+    ),
+    ?assertEqual(
+        [~"bob@example.com", ~"carol@example.com"],
+        [A#hikyaku_address.address || A <- hikyaku_email:to(Email)]
+    ),
+    ?assertEqual([#hikyaku_address{address = ~"cc@example.com"}], hikyaku_email:cc(Email)),
+    ?assertEqual([#hikyaku_address{address = ~"bcc@example.com"}], hikyaku_email:bcc(Email)),
+    ?assertEqual(#hikyaku_address{address = ~"reply@example.com"}, hikyaku_email:reply_to(Email)),
+    ?assertEqual(~"text", hikyaku_email:text_body(Email)),
+    ?assertEqual(~"<b>html</b>", hikyaku_email:html_body(Email)),
+    ?assertEqual([Att], hikyaku_email:attachments(Email)),
+    ?assertEqual(#{~"X-Tag" => ~"tag"}, hikyaku_email:headers(Email)),
+    ?assertEqual(#{tag => ~"welcome"}, hikyaku_email:provider_options(Email)).
+
+accessors_on_new_email_test() ->
+    Email = hikyaku_email:new(),
+    ?assertEqual(<<>>, hikyaku_email:subject(Email)),
+    ?assertEqual(undefined, hikyaku_email:from(Email)),
+    ?assertEqual([], hikyaku_email:to(Email)),
+    ?assertEqual(undefined, hikyaku_email:reply_to(Email)),
+    ?assertEqual(undefined, hikyaku_email:text_body(Email)),
+    ?assertEqual(undefined, hikyaku_email:html_body(Email)),
+    ?assertEqual([], hikyaku_email:attachments(Email)),
+    ?assertEqual(#{}, hikyaku_email:headers(Email)).

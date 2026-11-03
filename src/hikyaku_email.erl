@@ -20,6 +20,20 @@
     put_bcc/2
 ]).
 
+-export([
+    subject/1,
+    from/1,
+    to/1,
+    cc/1,
+    bcc/1,
+    reply_to/1,
+    text_body/1,
+    html_body/1,
+    attachments/1,
+    headers/1,
+    provider_options/1
+]).
+
 -type address_input() ::
     binary()
     | {binary(), binary()}
@@ -88,6 +102,61 @@ put_cc(Email, Addresses) when is_list(Addresses) ->
 -spec put_bcc(#hikyaku_email{}, [address_input()]) -> #hikyaku_email{}.
 put_bcc(Email, Addresses) when is_list(Addresses) ->
     Email#hikyaku_email{bcc = [normalize_address(A) || A <- Addresses]}.
+
+-doc "Returns the subject.".
+-spec subject(#hikyaku_email{}) -> binary().
+subject(#hikyaku_email{subject = Subject}) ->
+    Subject.
+
+-doc "Returns the sender, or `undefined` if none is set.".
+-spec from(#hikyaku_email{}) -> #hikyaku_address{} | undefined.
+from(#hikyaku_email{from = From}) ->
+    From.
+
+-doc "Returns the `To` recipients in the order they were added.".
+-spec to(#hikyaku_email{}) -> [#hikyaku_address{}].
+to(#hikyaku_email{to = To}) ->
+    To.
+
+-doc "Returns the `Cc` recipients in the order they were added.".
+-spec cc(#hikyaku_email{}) -> [#hikyaku_address{}].
+cc(#hikyaku_email{cc = Cc}) ->
+    Cc.
+
+-doc "Returns the `Bcc` recipients in the order they were added.".
+-spec bcc(#hikyaku_email{}) -> [#hikyaku_address{}].
+bcc(#hikyaku_email{bcc = Bcc}) ->
+    Bcc.
+
+-doc "Returns the `Reply-To` address, or `undefined` if none is set.".
+-spec reply_to(#hikyaku_email{}) -> #hikyaku_address{} | undefined.
+reply_to(#hikyaku_email{reply_to = ReplyTo}) ->
+    ReplyTo.
+
+-doc "Returns the plain-text body, or `undefined` if none is set.".
+-spec text_body(#hikyaku_email{}) -> binary() | undefined.
+text_body(#hikyaku_email{text_body = Body}) ->
+    Body.
+
+-doc "Returns the HTML body, or `undefined` if none is set.".
+-spec html_body(#hikyaku_email{}) -> binary() | undefined.
+html_body(#hikyaku_email{html_body = Body}) ->
+    Body.
+
+-doc "Returns the attachments in the order they were added.".
+-spec attachments(#hikyaku_email{}) -> [#hikyaku_attachment{}].
+attachments(#hikyaku_email{attachments = Attachments}) ->
+    Attachments.
+
+-doc "Returns the custom headers.".
+-spec headers(#hikyaku_email{}) -> #{binary() => binary()}.
+headers(#hikyaku_email{headers = Headers}) ->
+    Headers.
+
+-doc "Returns the provider-specific options.".
+-spec provider_options(#hikyaku_email{}) -> map().
+provider_options(#hikyaku_email{provider_options = Opts}) ->
+    Opts.
 
 -spec normalize_address(address_input()) -> #hikyaku_address{}.
 normalize_address(#hikyaku_address{} = Addr) ->
