@@ -202,17 +202,76 @@ address_rejects_control_characters_test_() ->
     New = hikyaku_email:new(),
     [
         ?_assertError(
-            {invalid_address, _}, hikyaku_email:from(New, {~"Bob\r\nX-Name: 1", ~"b@x.com"})
+            {invalid_address, name, _}, hikyaku_email:from(New, {~"Bob\r\nX-Name: 1", ~"b@x.com"})
         ),
-        ?_assertError({invalid_address, _}, hikyaku_email:to(New, ~"c@example.com\r\nX-To: 1")),
-        ?_assertError({invalid_address, _}, hikyaku_email:cc(New, ~"a@x.com, b@y.com")),
-        ?_assertError({invalid_address, _}, hikyaku_email:bcc(New, ~"<a@x.com>")),
-        ?_assertError({invalid_address, _}, hikyaku_email:put_to(New, [~"ok@x.com", ~"a b@x.com"])),
         ?_assertError(
-            {invalid_address, _},
+            {invalid_address, address, _}, hikyaku_email:to(New, ~"c@example.com\r\nX-To: 1")
+        ),
+        ?_assertError({invalid_address, address, _}, hikyaku_email:cc(New, ~"a@x.com, b@y.com")),
+        ?_assertError({invalid_address, address, _}, hikyaku_email:bcc(New, ~"<a@x.com>")),
+        ?_assertError(
+            {invalid_address, address, _}, hikyaku_email:put_to(New, [~"ok@x.com", ~"a b@x.com"])
+        ),
+        ?_assertError(
+            {invalid_address, address, _},
             hikyaku_email:reply_to(New, #hikyaku_address{address = ~"r@x.com\n"})
         )
     ].
+
+address_rejects_malformed_mailboxes_test_() ->
+    [
+        ?_assertError(
+            {invalid_address, address, Address}, hikyaku_email:to(hikyaku_email:new(), Address)
+        )
+     || Address <- [
+            ~"a@b.com;c@d.com",
+            ~"a(x)@b.com",
+            ~"localuser",
+            ~"Bob <b@x.com>",
+            ~"a..b@x.com",
+            ~"a@b@c.com",
+            ~""
+        ]
+    ].
+
+address_accepts_valid_mailboxes_test_() ->
+    [
+        ?_test(begin
+            Email = hikyaku_email:from(hikyaku_email:to(hikyaku_email:new(), Address), Address),
+            [#hikyaku_address{address = Address}] = hikyaku_email:to(Email),
+            Encoded = mimemail:encode(hikyaku_adapter_smtp:build_mimemail(Email)),
+            ?assert(is_binary(Encoded))
+        end)
+     || Address <- [
+            ~"bob+tag@example.com",
+            ~"bob@bücher.de",
+            ~"\"a\"@b.com",
+            ~"\"a b\"@b.com",
+            ~"user@localhost",
+            ~"a@[127.0.0.1]"
+        ]
+    ].
+
+display_name_accepted_and_encodable_test_() ->
+    [
+        ?_test(begin
+            Email = hikyaku_email:to(
+                hikyaku_email:from(hikyaku_email:new(), {Name, ~"a@x.com"}), ~"b@x.com"
+            ),
+            ?assert(is_binary(mimemail:encode(hikyaku_adapter_smtp:build_mimemail(Email))))
+        end)
+     || Name <- [
+            ~"Bob Smith",
+            ~"Bob <ceo@bank.com>, x",
+            ~"Bob \"The\" \\ B",
+            ~"Åsa Öberg, AB",
+            ~"  spaced  "
+        ]
+    ].
+
+empty_display_name_is_no_name_test() ->
+    Email = hikyaku_email:from(hikyaku_email:new(), {<<>>, ~"a@x.com"}),
+    ?assertEqual(#hikyaku_address{address = ~"a@x.com"}, hikyaku_email:from(Email)).
 
 attachment_rejects_invalid_record_test() ->
     Att = (hikyaku_attachment:from_data(~"a.txt", ~"data"))#hikyaku_attachment{

@@ -57,22 +57,27 @@
 new() ->
     #hikyaku_email{}.
 
+-doc "Sets the sender. Raises `{invalid_address, address | name, Value}` for an address or display name that is not a single valid mailbox.".
 -spec from(#hikyaku_email{}, address_input()) -> #hikyaku_email{}.
 from(Email, Input) ->
     Email#hikyaku_email{from = normalize_address(Input)}.
 
+-doc "Appends a `To` recipient. Raises `{invalid_address, address | name, Value}` for an address or display name that is not a single valid mailbox.".
 -spec to(#hikyaku_email{}, address_input()) -> #hikyaku_email{}.
 to(Email = #hikyaku_email{to = Current}, Input) ->
     Email#hikyaku_email{to = Current ++ [normalize_address(Input)]}.
 
+-doc "Appends a `Cc` recipient. Raises `{invalid_address, address | name, Value}` for an address or display name that is not a single valid mailbox.".
 -spec cc(#hikyaku_email{}, address_input()) -> #hikyaku_email{}.
 cc(Email = #hikyaku_email{cc = Current}, Input) ->
     Email#hikyaku_email{cc = Current ++ [normalize_address(Input)]}.
 
+-doc "Appends a `Bcc` recipient. Raises `{invalid_address, address | name, Value}` for an address or display name that is not a single valid mailbox.".
 -spec bcc(#hikyaku_email{}, address_input()) -> #hikyaku_email{}.
 bcc(Email = #hikyaku_email{bcc = Current}, Input) ->
     Email#hikyaku_email{bcc = Current ++ [normalize_address(Input)]}.
 
+-doc "Sets the `Reply-To` address. Raises `{invalid_address, address | name, Value}` for an address or display name that is not a single valid mailbox.".
 -spec reply_to(#hikyaku_email{}, address_input()) -> #hikyaku_email{}.
 reply_to(Email, Input) ->
     Email#hikyaku_email{reply_to = normalize_address(Input)}.
@@ -129,14 +134,17 @@ header(Email = #hikyaku_email{headers = Headers}, Key, Value) when
 provider_option(Email = #hikyaku_email{provider_options = Opts}, Key, Value) when is_atom(Key) ->
     Email#hikyaku_email{provider_options = Opts#{Key => Value}}.
 
+-doc "Replaces the `To` recipients. Raises `{invalid_address, address | name, Value}` for an address or display name that is not a single valid mailbox.".
 -spec put_to(#hikyaku_email{}, [address_input()]) -> #hikyaku_email{}.
 put_to(Email, Addresses) when is_list(Addresses) ->
     Email#hikyaku_email{to = [normalize_address(A) || A <- Addresses]}.
 
+-doc "Replaces the `Cc` recipients. Raises `{invalid_address, address | name, Value}` for an address or display name that is not a single valid mailbox.".
 -spec put_cc(#hikyaku_email{}, [address_input()]) -> #hikyaku_email{}.
 put_cc(Email, Addresses) when is_list(Addresses) ->
     Email#hikyaku_email{cc = [normalize_address(A) || A <- Addresses]}.
 
+-doc "Replaces the `Bcc` recipients. Raises `{invalid_address, address | name, Value}` for an address or display name that is not a single valid mailbox.".
 -spec put_bcc(#hikyaku_email{}, [address_input()]) -> #hikyaku_email{}.
 put_bcc(Email, Addresses) when is_list(Addresses) ->
     Email#hikyaku_email{bcc = [normalize_address(A) || A <- Addresses]}.
@@ -197,20 +205,9 @@ provider_options(#hikyaku_email{provider_options = Opts}) ->
     Opts.
 
 -spec normalize_address(address_input()) -> #hikyaku_address{}.
-normalize_address(#hikyaku_address{name = Name, address = Address} = Addr) ->
-    validate_address(Name, Address),
-    Addr;
+normalize_address(#hikyaku_address{name = Name, address = Address}) ->
+    hikyaku_address:new(Name, Address);
 normalize_address({Name, Address}) when is_binary(Name), is_binary(Address) ->
-    validate_address(Name, Address),
-    #hikyaku_address{name = Name, address = Address};
+    hikyaku_address:new(Name, Address);
 normalize_address(Address) when is_binary(Address) ->
-    validate_address(undefined, Address),
-    #hikyaku_address{address = Address}.
-
-validate_address(Name, Address) ->
-    ValidName = Name =:= undefined orelse re:run(Name, ~"[\\x00-\\x1f\\x7f]") =:= nomatch,
-    ValidAddress = re:run(Address, ~"\\A[^\\x00-\\x20\\x7f<>,]+\\z") =/= nomatch,
-    case ValidName andalso ValidAddress of
-        true -> ok;
-        false -> error({invalid_address, {Name, Address}})
-    end.
+    hikyaku_address:new(undefined, Address).
