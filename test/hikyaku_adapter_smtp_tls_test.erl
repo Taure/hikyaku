@@ -20,9 +20,6 @@ tls_test_() ->
                 {"implicit TLS rejects an untrusted relay by default", fun() ->
                     ssl_untrusted(Pki)
                 end},
-                {"an IP relay is dialled directly despite a spoofed MX answer", fun() ->
-                    ip_relay_ignores_mx(Pki)
-                end},
                 {"caller tls_options accept a chain with an intermediate", fun intermediate_chain/0}
             ]
         end}.
@@ -73,24 +70,39 @@ ssl_untrusted(Pki) ->
         ?assertNot(auth_seen())
     end).
 
-ip_relay_ignores_mx(#{cacerts := CaCerts} = Pki) ->
-    Dns = hikyaku_smtp_test_server:start_dns(),
-    try
-        with_server(ssl, Pki, fun(Port) ->
-            Config = #{
-                relay => ~"127.0.0.2",
-                port => Port,
-                ssl => true,
-                username => ~"user",
-                password => ~"secret",
-                tls_options => [{verify, verify_peer}, {cacerts, CaCerts}]
-            },
-            ?assertMatch({error, _}, hikyaku_adapter_smtp:deliver(email(), Config)),
-            ?assertNot(auth_seen())
-        end)
-    after
-        hikyaku_smtp_test_server:stop_dns(Dns)
-    end.
+ip_relay_mx_test_() ->
+    {setup,
+        fun() ->
+            {ok, _} = application:ensure_all_started(ssl),
+            hikyaku_smtp_test_server:start_dns()
+        end,
+        fun hikyaku_smtp_test_server:stop_dns/1, fun(Dns) ->
+            [
+                {"an IP relay is dialled directly, never through an MX lookup", fun() ->
+                    ip_relay_ignores_mx(Dns)
+                end}
+            ]
+        end}.
+
+ip_relay_ignores_mx(Dns) ->
+    #{cacerts := CaCerts} = Pki = hikyaku_smtp_test_server:pki(),
+    with_server(ssl, Pki, fun(Port) ->
+        Opts = hikyaku_adapter_smtp:build_smtp_opts(#{
+            relay => ~"127.0.0.2",
+            port => Port,
+            ssl => true,
+            username => ~"user",
+            password => ~"secret",
+            tls_options => [{verify, verify_peer}, {cacerts, CaCerts}]
+        }),
+        Result = gen_smtp_client:send_blocking(
+            {"alice@example.com", ["bob@example.com"], ~"Subject: hi\r\n\r\nhello"},
+            [{timeout, 2000}, {retries, 0} | Opts]
+        ),
+        ?assertNotMatch(Receipt when is_binary(Receipt), Result),
+        ?assertEqual([], [Q || {_, mx} = Q <- hikyaku_smtp_test_server:dns_queries(Dns)]),
+        ?assertNot(auth_seen())
+    end).
 
 intermediate_chain() ->
     #{cacerts := CaCerts} = Pki = hikyaku_smtp_test_server:pki(1),
