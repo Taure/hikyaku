@@ -68,6 +68,25 @@ deliver_with_attachments_test() ->
     ?assert(is_binary(RawData)),
     ?assert(byte_size(RawData) > 0).
 
+deliver_raw_attachment_keeps_filename_and_base64_test() ->
+    Data = <<0, 1, 2, 255, "binary payload">>,
+    Att = hikyaku_attachment:from_data(~"report.pdf", Data),
+    {ok, _} = hikyaku_adapter_ses:deliver(
+        hikyaku_email:attachment(build_email(), Att), base_config()
+    ),
+    Raw = base64:decode(raw_data(persistent_term:get(ses_test_body))),
+    ?assertMatch(
+        {match, _},
+        re:run(Raw, ~"Content-Disposition: attachment;\\s*filename=\"?report.pdf", [caseless])
+    ),
+    ?assertMatch({match, _}, re:run(Raw, ~"Content-Transfer-Encoding: base64", [caseless])),
+    {_, _, _, _, Parts} = mimemail:decode(Raw),
+    [{_, _, _, Params, Body}] = [P || {_, _, _, #{disposition := ~"attachment"}, _} = P <- Parts],
+    ?assertEqual(
+        ~"report.pdf", proplists:get_value(~"filename", maps:get(disposition_params, Params))
+    ),
+    ?assertEqual(Data, Body).
+
 deliver_with_reply_to_test() ->
     Email = hikyaku_email:reply_to(build_email(), <<"reply@x.com">>),
     Config = base_config(),
@@ -84,6 +103,10 @@ deliver_error_test() ->
     {error, #{status_code := 400}} = hikyaku_adapter_ses:deliver(Email, Config).
 
 %%% Helpers
+
+raw_data(Body) ->
+    #{~"Content" := #{~"Raw" := #{~"Data" := Data}}} = json:decode(Body),
+    Data.
 
 base_config() ->
     #{

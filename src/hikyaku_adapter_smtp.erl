@@ -191,9 +191,9 @@ build_attachment_part(#hikyaku_attachment{
             _ -> [{<<"Content-ID">>, <<"<", Cid/binary, ">">>}]
         end,
     Params = #{
-        <<"disposition">> => DispBin,
-        <<"disposition-params">> => [{<<"filename">>, Filename}],
-        <<"transfer-encoding">> => <<"base64">>
+        disposition => DispBin,
+        disposition_params => [{~"filename", Filename}],
+        transfer_encoding => ~"base64"
     },
     {Type, SubType, Headers, Params, Data}.
 

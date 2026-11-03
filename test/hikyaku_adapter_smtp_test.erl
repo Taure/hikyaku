@@ -53,6 +53,24 @@ build_mimemail_reply_to_header_test() ->
     ReplyToHeader = proplists:get_value(<<"Reply-To">>, Headers),
     ?assertEqual(<<"reply@x.com">>, ReplyToHeader).
 
+encoded_attachment_keeps_filename_and_base64_test() ->
+    Data = <<0, 1, 2, 255, "binary payload">>,
+    Att = hikyaku_attachment:from_data(~"report.pdf", Data),
+    Email = hikyaku_email:attachment(build_email(~"text", undefined), Att),
+    Encoded = mimemail:encode(hikyaku_adapter_smtp:build_mimemail(Email)),
+    assert_attachment_part(Encoded, ~"attachment", ~"report.pdf", Data).
+
+encoded_inline_attachment_keeps_content_id_test() ->
+    Path = filename:join(code:lib_dir(stdlib), "ebin/stdlib.app"),
+    Att = (hikyaku_attachment:inline(~"logo", list_to_binary(Path)))#hikyaku_attachment{
+        content_type = ~"image/png"
+    },
+    Email = hikyaku_email:attachment(build_email(undefined, undefined), Att),
+    Encoded = mimemail:encode(hikyaku_adapter_smtp:build_mimemail(Email)),
+    {ok, Data} = file:read_file(Path),
+    assert_attachment_part(Encoded, ~"inline", ~"stdlib.app", Data),
+    ?assertMatch({match, _}, re:run(Encoded, ~"Content-ID: <logo>", [caseless])).
+
 %%% SMTP options - relay certificate verification
 
 smtp_opts_tls_always_verifies_peer_test() ->
@@ -147,6 +165,24 @@ smtp_opts_no_mx_lookups_test() ->
     ?assertEqual(true, proplists:get_value(no_mx_lookups, Direct)).
 
 %%% Helpers
+
+assert_attachment_part(Encoded, Disposition, Filename, Data) ->
+    ?assertMatch(
+        {match, _},
+        re:run(
+            Encoded,
+            <<"Content-Disposition: ", Disposition/binary, ";\\s*filename=\"?", Filename/binary>>,
+            [caseless]
+        )
+    ),
+    ?assertMatch({match, _}, re:run(Encoded, ~"Content-Transfer-Encoding: base64", [caseless])),
+    {_, _, _, _, Parts} = mimemail:decode(Encoded),
+    [{_, _, _, Params, Body}] = [
+        P
+     || {_, _, _, #{disposition := D}, _} = P <- Parts, D =:= Disposition
+    ],
+    ?assertEqual(Filename, proplists:get_value(~"filename", maps:get(disposition_params, Params))),
+    ?assertEqual(Data, Body).
 
 build_email(Text, Html) ->
     E0 = hikyaku_email:from(hikyaku_email:new(), {<<"Alice">>, <<"alice@example.com">>}),
