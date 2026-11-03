@@ -157,3 +157,43 @@ accessors_on_new_email_test() ->
     ?assertEqual(undefined, hikyaku_email:html_body(Email)),
     ?assertEqual([], hikyaku_email:attachments(Email)),
     ?assertEqual(#{}, hikyaku_email:headers(Email)).
+
+header_rejects_invalid_names_test_() ->
+    [
+        ?_assertError({invalid_header, Name}, hikyaku_email:header(hikyaku_email:new(), Name, ~"v"))
+     || Name <- [~"", ~"X-K: v\r\nX-Inj", ~"X K", ~"X:K", binary:copy(~"x", 77)]
+    ].
+
+header_rejects_crlf_in_value_test_() ->
+    [
+        ?_assertError(
+            {invalid_header, ~"X-A"}, hikyaku_email:header(hikyaku_email:new(), ~"X-A", Value)
+        )
+     || Value <- [~"v\r\nX-Injected: 1", ~"v\nX-Injected: 1", ~"v\r"]
+    ].
+
+header_rejects_reserved_names_test_() ->
+    [
+        ?_assertError(
+            {reserved_header, Name}, hikyaku_email:header(hikyaku_email:new(), Name, ~"v")
+        )
+     || Name <- [
+            ~"From",
+            ~"to",
+            ~"CC",
+            ~"Bcc",
+            ~"Reply-To",
+            ~"Subject",
+            ~"Content-Type",
+            ~"MIME-Version",
+            ~"content-transfer-encoding"
+        ]
+    ].
+
+header_accepts_message_id_and_list_unsubscribe_test() ->
+    E0 = hikyaku_email:header(hikyaku_email:new(), ~"Message-ID", ~"<id@example.com>"),
+    E1 = hikyaku_email:header(E0, ~"List-Unsubscribe", ~"<mailto:u@example.com>"),
+    ?assertEqual(
+        #{~"Message-ID" => ~"<id@example.com>", ~"List-Unsubscribe" => ~"<mailto:u@example.com>"},
+        hikyaku_email:headers(E1)
+    ).

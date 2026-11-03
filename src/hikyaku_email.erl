@@ -2,6 +2,18 @@
 
 -include("hikyaku.hrl").
 
+-define(RESERVED_HEADERS, [
+    ~"from",
+    ~"to",
+    ~"cc",
+    ~"bcc",
+    ~"reply-to",
+    ~"subject",
+    ~"content-type",
+    ~"mime-version",
+    ~"content-transfer-encoding"
+]).
+
 -export([
     new/0,
     from/2,
@@ -81,11 +93,31 @@ html_body(Email, Body) when is_binary(Body) ->
 attachment(Email = #hikyaku_email{attachments = Current}, Att = #hikyaku_attachment{}) ->
     Email#hikyaku_email{attachments = Current ++ [Att]}.
 
+-doc """
+Sets a custom header.
+
+The name must be 1 to 76 printable ASCII characters without `:`, and the
+value must not contain CR or LF; otherwise `{invalid_header, Name}` is
+raised. Headers that hikyaku sets from other fields (`From`, `To`, `Cc`,
+`Bcc`, `Reply-To`, `Subject`, `Content-Type`, `MIME-Version`,
+`Content-Transfer-Encoding`) raise `{reserved_header, Name}`: use the
+matching setter instead.
+""".
 -spec header(#hikyaku_email{}, binary(), binary()) -> #hikyaku_email{}.
 header(Email = #hikyaku_email{headers = Headers}, Key, Value) when
     is_binary(Key), is_binary(Value)
 ->
-    Email#hikyaku_email{headers = Headers#{Key => Value}}.
+    case
+        re:run(Key, ~"\\A[!-9;-~]{1,76}\\z") =/= nomatch andalso
+            re:run(Value, ~"[\\r\\n]") =:= nomatch
+    of
+        false -> error({invalid_header, Key});
+        true -> ok
+    end,
+    case lists:member(string:lowercase(Key), ?RESERVED_HEADERS) of
+        true -> error({reserved_header, Key});
+        false -> Email#hikyaku_email{headers = Headers#{Key => Value}}
+    end.
 
 -spec provider_option(#hikyaku_email{}, atom(), term()) -> #hikyaku_email{}.
 provider_option(Email = #hikyaku_email{provider_options = Opts}, Key, Value) when is_atom(Key) ->
