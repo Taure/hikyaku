@@ -4,6 +4,9 @@
 
 -define(TOKEN, "[!#$%&'*+.^_`|~0-9A-Za-z-]+").
 -define(QUOTED_STRING, "\"(?:[^\"\\\\\\x00-\\x1f\\x7f]|\\\\[^\\x00-\\x1f\\x7f])*\"").
+-define(FILENAME_RE, ~"\\A[^\\x00-\\x1f\\x7f]+\\z").
+%% Printable ASCII except `<` and `>`, which delimit the Content-ID header.
+-define(CID_RE, ~"\\A[!-;=?-~]+\\z").
 -define(CONTENT_TYPE_RE,
     "\\A" ?TOKEN "/" ?TOKEN "(?:[ \\t]*;[ \\t]*" ?TOKEN "=(?:" ?TOKEN "|" ?QUOTED_STRING "))*\\z"
 ).
@@ -16,6 +19,8 @@
     inline/2,
     validate/1
 ]).
+
+-export([content/1, media_type/1, parse_content_type/1]).
 
 -spec from_path(binary()) -> #hikyaku_attachment{}.
 from_path(Path) when is_binary(Path) ->
@@ -73,12 +78,59 @@ validate(
     #hikyaku_attachment{filename = Filename, content_type = ContentType, cid = Cid} = Att
 ) ->
     check(content_type, ContentType, ?CONTENT_TYPE_RE),
-    check(filename, Filename, ~"\\A[^\\x00-\\x1f\\x7f]+\\z"),
+    check(filename, Filename, ?FILENAME_RE),
     case Cid of
         undefined -> ok;
-        _ -> check(cid, Cid, ~"\\A[!-;=?-~]+\\z")
+        _ -> check(cid, Cid, ?CID_RE)
     end,
     Att.
+
+-doc false.
+-spec content(#hikyaku_attachment{}) -> binary().
+content(#hikyaku_attachment{data = Data}) when is_binary(Data) ->
+    Data;
+content(#hikyaku_attachment{path = Path}) when is_binary(Path) ->
+    {ok, Data} = file:read_file(Path),
+    Data.
+
+-doc false.
+-spec media_type(binary()) -> binary().
+media_type(ContentType) ->
+    {Type, SubType, _Params} = parse_content_type(ContentType),
+    <<Type/binary, "/", SubType/binary>>.
+
+-doc false.
+-spec parse_content_type(binary()) -> {binary(), binary(), [{binary(), binary()}]}.
+parse_content_type(ContentType) ->
+    [Type, Rest0] = binary:split(ContentType, ~"/"),
+    [SubType | _] = binary:split(Rest0, [~";", ~" ", ~"\t"]),
+    Rest = binary:part(Rest0, byte_size(SubType), byte_size(Rest0) - byte_size(SubType)),
+    Params =
+        case
+            re:run(Rest, ~"([^\\s;=]+)=(\"(?:[^\"\\\\]|\\\\.)*\"|[^\\s;]+)", [
+                global, {capture, all_but_first, binary}
+            ])
+        of
+            nomatch ->
+                [];
+            {match, Matches} ->
+                [
+                    {lowercase(N), unquote(V)}
+                 || [N, V] <- Matches, is_binary(N), is_binary(V)
+                ]
+        end,
+    {Type, SubType, Params}.
+
+lowercase(Bin) ->
+    case string:lowercase(Bin) of
+        Lower when is_binary(Lower) -> Lower
+    end.
+
+unquote(<<$", Quoted/binary>>) ->
+    Inner = binary:part(Quoted, 0, byte_size(Quoted) - 1),
+    re:replace(Inner, ~"\\\\(.)", ~"\\1", [global, {return, binary}]);
+unquote(Token) ->
+    Token.
 
 %%% Internal
 

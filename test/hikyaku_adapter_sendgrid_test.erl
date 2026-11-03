@@ -107,6 +107,14 @@ deliver_with_attachments_test() ->
         Inline
     ).
 
+deliver_sends_bare_media_type_test() ->
+    Att = hikyaku_attachment:from_data(~"data.csv", ~"a,b", #{
+        content_type => ~"text/csv; charset=utf-8; header=present"
+    }),
+    Decoded = deliver_and_decode(hikyaku_email:attachment(build_email(), Att)),
+    [Sent] = maps:get(~"attachments", Decoded),
+    ?assertEqual(~"text/csv", maps:get(~"type", Sent)).
+
 deliver_with_headers_test() ->
     Email = hikyaku_email:header(build_email(), ~"X-Campaign", ~"welcome"),
     Decoded = deliver_and_decode(Email),

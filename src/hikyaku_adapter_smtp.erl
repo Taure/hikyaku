@@ -213,20 +213,16 @@ content_parts(T, H) when is_binary(T), is_binary(H) ->
         ]}
     ].
 
-build_attachment_part(#hikyaku_attachment{
-    filename = Filename,
-    content_type = ContentType,
-    data = Data0,
-    path = Path,
-    disposition = Disposition,
-    cid = Cid
-}) ->
-    Data =
-        case Data0 of
-            undefined when is_binary(Path) -> read_file(Path);
-            Bin when is_binary(Bin) -> Bin
-        end,
-    {Type, SubType, ContentTypeParams} = split_content_type(ContentType),
+build_attachment_part(
+    #hikyaku_attachment{
+        filename = Filename,
+        content_type = ContentType,
+        disposition = Disposition,
+        cid = Cid
+    } = Att
+) ->
+    Data = hikyaku_attachment:content(Att),
+    {Type, SubType, ContentTypeParams} = hikyaku_attachment:parse_content_type(ContentType),
     DispBin =
         case Disposition of
             inline -> <<"inline">>;
@@ -244,34 +240,3 @@ build_attachment_part(#hikyaku_attachment{
         transfer_encoding => ~"base64"
     },
     {Type, SubType, Headers, Params, Data}.
-
-%% The content type has already passed hikyaku_attachment:validate/1.
-split_content_type(ContentType) ->
-    [Type, Rest0] = binary:split(ContentType, ~"/"),
-    [SubType | _] = binary:split(Rest0, [~";", ~" ", ~"\t"]),
-    Rest = binary:part(Rest0, byte_size(SubType), byte_size(Rest0) - byte_size(SubType)),
-    Params =
-        case
-            re:run(Rest, ~"([^\\s;=]+)=(\"(?:[^\"\\\\]|\\\\.)*\"|[^\\s;]+)", [
-                global, {capture, all_but_first, binary}
-            ])
-        of
-            nomatch ->
-                [];
-            {match, Matches} ->
-                [
-                    {string:lowercase(N), unquote(V)}
-                 || [N, V] <- Matches, is_binary(N), is_binary(V)
-                ]
-        end,
-    {Type, SubType, Params}.
-
-unquote(<<$", Quoted/binary>>) ->
-    Inner = binary:part(Quoted, 0, byte_size(Quoted) - 1),
-    re:replace(Inner, ~"\\\\(.)", ~"\\1", [global, {return, binary}]);
-unquote(Token) ->
-    Token.
-
-read_file(Path) ->
-    {ok, Data} = file:read_file(Path),
-    Data.

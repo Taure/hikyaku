@@ -86,21 +86,14 @@ build_parts(#hikyaku_email{
 build_attachment_parts(Attachments) ->
     lists:map(fun build_attachment_part/1, Attachments).
 
-build_attachment_part(#hikyaku_attachment{
-    filename = Filename,
-    content_type = ContentType,
-    data = Data0,
-    path = Path,
-    disposition = Disposition
-}) ->
-    Data =
-        case Data0 of
-            undefined when is_binary(Path) ->
-                {ok, Bin} = file:read_file(Path),
-                Bin;
-            Bin when is_binary(Bin) ->
-                Bin
-        end,
+build_attachment_part(
+    #hikyaku_attachment{
+        filename = Filename,
+        content_type = ContentType,
+        disposition = Disposition
+    } = Att
+) ->
+    Data = hikyaku_attachment:content(Att),
     FieldName =
         case Disposition of
             inline -> <<"inline">>;

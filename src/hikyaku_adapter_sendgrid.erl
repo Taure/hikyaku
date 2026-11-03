@@ -104,26 +104,19 @@ maybe_add_attachments(Payload, []) ->
 maybe_add_attachments(Payload, Attachments) ->
     Payload#{~"attachments" => [encode_attachment(A) || A <- Attachments]}.
 
-encode_attachment(#hikyaku_attachment{
-    filename = Filename,
-    content_type = ContentType,
-    data = Data0,
-    path = Path,
-    disposition = Disposition,
-    cid = Cid
-}) ->
-    Data =
-        case Data0 of
-            undefined when is_binary(Path) ->
-                {ok, Bin} = file:read_file(Path),
-                Bin;
-            Bin when is_binary(Bin) ->
-                Bin
-        end,
+%% SendGrid refuses a `type` containing `;`, so parameters are dropped.
+encode_attachment(
+    #hikyaku_attachment{
+        filename = Filename,
+        content_type = ContentType,
+        disposition = Disposition,
+        cid = Cid
+    } = Att
+) ->
     Encoded = #{
-        ~"content" => base64:encode(Data),
+        ~"content" => base64:encode(hikyaku_attachment:content(Att)),
         ~"filename" => Filename,
-        ~"type" => ContentType,
+        ~"type" => hikyaku_attachment:media_type(ContentType),
         ~"disposition" => atom_to_binary(Disposition)
     },
     case Cid of
