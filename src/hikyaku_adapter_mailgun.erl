@@ -15,8 +15,13 @@ deliver(Email, Config) ->
     EncodedDomain = hikyaku_url:encode(Domain),
     Url = <<BaseUrl/binary, "/v3/", EncodedDomain/binary, "/messages">>,
     Credentials = base64:encode(<<"api:", ApiKey/binary>>),
-    Parts = build_parts(Email),
-    {ContentType, Body} = hikyaku_multipart:encode(Parts),
+    try hikyaku_multipart:encode(build_parts(Email)) of
+        {ContentType, Body} -> post(HttpMod, Url, Credentials, ContentType, Body)
+    catch
+        error:{invalid_form_part, _} = Reason -> {error, Reason}
+    end.
+
+post(HttpMod, Url, Credentials, ContentType, Body) ->
     Headers = [
         {<<"authorization">>, <<"Basic ", Credentials/binary>>},
         {<<"content-type">>, ContentType}
