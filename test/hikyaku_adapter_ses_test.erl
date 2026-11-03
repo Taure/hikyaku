@@ -74,13 +74,14 @@ deliver_raw_attachment_keeps_filename_and_base64_test() ->
     {ok, _} = hikyaku_adapter_ses:deliver(
         hikyaku_email:attachment(build_email(), Att), base_config()
     ),
-    Raw = base64:decode(raw_data(persistent_term:get(ses_test_body))),
+    Raw = base64:decode(raw_data(decoded_body())),
     ?assertMatch(
         {match, _},
         re:run(Raw, ~"Content-Disposition: attachment;\\s*filename=\"?report.pdf", [caseless])
     ),
     ?assertMatch({match, _}, re:run(Raw, ~"Content-Transfer-Encoding: base64", [caseless])),
     {_, _, _, _, Parts} = mimemail:decode(Raw),
+    true = is_list(Parts),
     [{_, _, _, Params, Body}] = [P || {_, _, _, #{disposition := ~"attachment"}, _} = P <- Parts],
     ?assertEqual(
         ~"report.pdf", proplists:get_value(~"filename", maps:get(disposition_params, Params))
@@ -90,13 +91,13 @@ deliver_raw_attachment_keeps_filename_and_base64_test() ->
 deliver_with_headers_uses_raw_mime_test() ->
     Email = hikyaku_email:header(build_email(), ~"X-Campaign", ~"welcome"),
     {ok, _} = hikyaku_adapter_ses:deliver(Email, base_config()),
-    Raw = base64:decode(raw_data(persistent_term:get(ses_test_body))),
+    Raw = base64:decode(raw_data(decoded_body())),
     {_, _, Headers, _, _} = mimemail:decode(Raw),
     ?assertEqual(~"welcome", proplists:get_value(~"X-Campaign", Headers)).
 
 deliver_without_headers_uses_simple_content_test() ->
     {ok, _} = hikyaku_adapter_ses:deliver(build_email(), base_config()),
-    Content = maps:get(~"Content", json:decode(persistent_term:get(ses_test_body))),
+    Content = maps:get(~"Content", decoded_body()),
     ?assert(maps:is_key(~"Simple", Content)).
 
 deliver_with_reply_to_test() ->
@@ -116,8 +117,15 @@ deliver_error_test() ->
 
 %%% Helpers
 
-raw_data(Body) ->
-    #{~"Content" := #{~"Raw" := #{~"Data" := Data}}} = json:decode(Body),
+decoded_body() ->
+    case persistent_term:get(ses_test_body) of
+        Body when is_binary(Body) ->
+            case json:decode(Body) of
+                #{} = Decoded -> Decoded
+            end
+    end.
+
+raw_data(#{~"Content" := #{~"Raw" := #{~"Data" := Data}}}) when is_binary(Data) ->
     Data.
 
 base_config() ->

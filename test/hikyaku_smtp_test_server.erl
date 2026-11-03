@@ -91,7 +91,7 @@ handle(~"AUTH", _Line, Conn, Mode, SslOpts, Parent) ->
     command_loop(Conn, Mode, SslOpts, Parent);
 handle(~"DATA", _Line, Conn, Mode, SslOpts, Parent) ->
     send(Conn, ~"354 go\r\n"),
-    Data = read_data(Conn, []),
+    Data = read_data(Conn, <<>>),
     Parent ! {smtp_test_server, {data, transport(Conn), Data}},
     send(Conn, ~"250 queued\r\n"),
     command_loop(Conn, Mode, SslOpts, Parent);
@@ -104,9 +104,9 @@ handle(_Other, _Line, Conn, Mode, SslOpts, Parent) ->
 
 read_data(Conn, Acc) ->
     case recv(Conn) of
-        {ok, ~".\r\n"} -> iolist_to_binary(lists:reverse(Acc));
-        {ok, Line} -> read_data(Conn, [Line | Acc]);
-        {error, _} -> iolist_to_binary(lists:reverse(Acc))
+        {ok, ~".\r\n"} -> Acc;
+        {ok, Line} when is_binary(Line) -> read_data(Conn, <<Acc/binary, Line/binary>>);
+        _ -> Acc
     end.
 
 transport({tcp, _}) -> tcp;

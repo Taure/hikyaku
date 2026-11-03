@@ -76,9 +76,9 @@ deliver_with_reply_to_test() ->
 
 deliver_with_attachments_test() ->
     Data = <<0, 1, 2, 255, "pdf bytes">>,
-    Path = filename:join(code:lib_dir(stdlib), "ebin/stdlib.app"),
+    Path = list_to_binary(?FILE),
     {ok, PathData} = file:read_file(Path),
-    Logo = (hikyaku_attachment:inline(~"logo", list_to_binary(Path)))#hikyaku_attachment{
+    Logo = (hikyaku_attachment:inline(~"logo", Path))#hikyaku_attachment{
         content_type = ~"image/png"
     },
     Email = hikyaku_email:attachment(
@@ -99,7 +99,7 @@ deliver_with_attachments_test() ->
     ?assertEqual(
         #{
             ~"content" => base64:encode(PathData),
-            ~"filename" => ~"stdlib.app",
+            ~"filename" => ~"hikyaku_adapter_sendgrid_test.erl",
             ~"type" => ~"image/png",
             ~"disposition" => ~"inline",
             ~"content_id" => ~"logo"
@@ -135,7 +135,12 @@ deliver_and_decode(Email) ->
         http_client => ?MODULE
     },
     {ok, _} = hikyaku_adapter_sendgrid:deliver(Email, Config),
-    json:decode(persistent_term:get(sendgrid_test_body)).
+    case persistent_term:get(sendgrid_test_body) of
+        Body when is_binary(Body) ->
+            case json:decode(Body) of
+                #{} = Decoded -> Decoded
+            end
+    end.
 
 build_email() ->
     hikyaku_email:subject(

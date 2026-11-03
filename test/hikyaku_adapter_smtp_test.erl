@@ -61,21 +61,21 @@ encoded_attachment_keeps_filename_and_base64_test() ->
     assert_attachment_part(Encoded, ~"attachment", ~"report.pdf", Data).
 
 encoded_inline_attachment_keeps_content_id_test() ->
-    Path = filename:join(code:lib_dir(stdlib), "ebin/stdlib.app"),
-    Att = (hikyaku_attachment:inline(~"logo", list_to_binary(Path)))#hikyaku_attachment{
+    Path = list_to_binary(?FILE),
+    Att = (hikyaku_attachment:inline(~"logo", Path))#hikyaku_attachment{
         content_type = ~"image/png"
     },
     Email = hikyaku_email:attachment(build_email(undefined, undefined), Att),
     Encoded = mimemail:encode(hikyaku_adapter_smtp:build_mimemail(Email)),
     {ok, Data} = file:read_file(Path),
-    assert_attachment_part(Encoded, ~"inline", ~"stdlib.app", Data),
+    assert_attachment_part(Encoded, ~"inline", ~"hikyaku_adapter_smtp_test.erl", Data),
     ?assertMatch({match, _}, re:run(Encoded, ~"Content-ID: <logo>", [caseless])).
 
 %%% SMTP options - relay certificate verification
 
 smtp_opts_tls_always_verifies_peer_test() ->
     Opts = hikyaku_adapter_smtp:build_smtp_opts(#{relay => <<"mail.example.com">>, tls => always}),
-    TlsOpts = proplists:get_value(tls_options, Opts),
+    TlsOpts = list_opt(tls_options, Opts),
     ?assertEqual(verify_peer, proplists:get_value(verify, TlsOpts)),
     ?assertNotEqual(undefined, proplists:get_value(cacerts, TlsOpts)),
     ?assertNotEqual(undefined, proplists:get_value(customize_hostname_check, TlsOpts)).
@@ -83,7 +83,7 @@ smtp_opts_tls_always_verifies_peer_test() ->
 smtp_opts_default_tls_verifies_peer_test() ->
     %% tls defaults to if_available, which still upgrades - so it must verify.
     Opts = hikyaku_adapter_smtp:build_smtp_opts(#{relay => <<"mail.example.com">>}),
-    TlsOpts = proplists:get_value(tls_options, Opts),
+    TlsOpts = list_opt(tls_options, Opts),
     ?assertEqual(verify_peer, proplists:get_value(verify, TlsOpts)).
 
 smtp_opts_tls_never_omits_tls_options_test() ->
@@ -102,7 +102,7 @@ smtp_opts_caller_override_respected_test() ->
 
 smtp_opts_pins_relay_as_sni_test() ->
     Opts = hikyaku_adapter_smtp:build_smtp_opts(#{relay => ~"mail.example.com", tls => always}),
-    TlsOpts = proplists:get_value(tls_options, Opts),
+    TlsOpts = list_opt(tls_options, Opts),
     ?assertEqual("mail.example.com", proplists:get_value(server_name_indication, TlsOpts)).
 
 smtp_opts_caller_sni_respected_test() ->
@@ -117,7 +117,7 @@ smtp_opts_caller_sni_respected_test() ->
 
 smtp_opts_ip_relay_has_no_sni_test() ->
     Opts = hikyaku_adapter_smtp:build_smtp_opts(#{relay => ~"192.0.2.10", tls => always}),
-    TlsOpts = proplists:get_value(tls_options, Opts),
+    TlsOpts = list_opt(tls_options, Opts),
     ?assertNot(proplists:is_defined(server_name_indication, TlsOpts)),
     ?assertEqual(verify_peer, proplists:get_value(verify, TlsOpts)).
 
@@ -125,7 +125,7 @@ smtp_opts_ssl_verifies_peer_test() ->
     Opts = hikyaku_adapter_smtp:build_smtp_opts(#{
         relay => ~"mail.example.com", port => 465, ssl => true, tls => never
     }),
-    SockOpts = proplists:get_value(sockopts, Opts),
+    SockOpts = list_opt(sockopts, Opts),
     ?assertEqual(verify_peer, proplists:get_value(verify, SockOpts)),
     ?assertNotEqual(undefined, proplists:get_value(cacerts, SockOpts)),
     ?assertEqual("mail.example.com", proplists:get_value(server_name_indication, SockOpts)),
@@ -166,6 +166,14 @@ smtp_opts_no_mx_lookups_test() ->
 
 %%% Helpers
 
+list_opt(Key, Opts) ->
+    case proplists:get_value(Key, Opts) of
+        List when is_list(List) -> List
+    end.
+
+subparts({_, _, _, _, Parts}) when is_list(Parts) ->
+    Parts.
+
 assert_attachment_part(Encoded, Disposition, Filename, Data) ->
     ?assertMatch(
         {match, _},
@@ -176,7 +184,7 @@ assert_attachment_part(Encoded, Disposition, Filename, Data) ->
         )
     ),
     ?assertMatch({match, _}, re:run(Encoded, ~"Content-Transfer-Encoding: base64", [caseless])),
-    {_, _, _, _, Parts} = mimemail:decode(Encoded),
+    Parts = subparts(mimemail:decode(Encoded)),
     [{_, _, _, Params, Body}] = [
         P
      || {_, _, _, #{disposition := D}, _} = P <- Parts, D =:= Disposition
