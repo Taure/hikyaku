@@ -112,7 +112,20 @@ config() ->
     }.
 ```
 
-- `tls` controls STARTTLS. It defaults to `always`, so neither credentials nor the message are sent over an unencrypted connection. The exceptions are `ssl => true` (already encrypted) and a loopback relay (`localhost`, `127.0.0.0/8`, `::1`) without `username`, where it defaults to `if_available`. Setting `tls => if_available` elsewhere is an explicit downgrade: an on-path attacker can strip STARTTLS and read the session.
+- `tls` controls STARTTLS. It defaults to `always`, so neither credentials nor the message are sent over an unencrypted connection, and a relay that does not offer STARTTLS fails with an error. The exceptions are `ssl => true` (already encrypted) and a loopback relay (`localhost`, `127.0.0.0/8`, `::1`) without `username`, where it defaults to `if_available`.
+- To send plain SMTP to a relay on a trusted private network that has no STARTTLS, opt out explicitly with `tls => if_available` (use STARTTLS when offered, otherwise send in clear) or `tls => never` (never use STARTTLS):
+
+  ```erlang
+  config() ->
+      #{
+          adapter => hikyaku_adapter_smtp,
+          relay => <<"mailrelay.internal">>,
+          port => 25,
+          tls => if_available             %% trusted private network only
+      }.
+  ```
+
+  This is a downgrade: anyone on the path can strip STARTTLS and read the session, including the AUTH exchange if `username` is set. Only use it where the network itself is trusted.
 - `ssl => true` connects with implicit TLS (port 465) instead of STARTTLS.
 - Every TLS connection, STARTTLS or implicit, verifies the relay certificate against the OS trust store (`public_key:cacerts_get()`) and checks that it is valid for `relay`, which is also sent as SNI.
 - `tls_options` replaces the default ssl client options, for example to trust a private CA:
@@ -122,7 +135,7 @@ config() ->
   ```
 
   `relay` is still sent as SNI unless the list sets `server_name_indication`, and `{depth, 3}` is added unless the list sets `depth`, so a chain with intermediates verifies.
-- gen_smtp looks up MX records for `relay` and connects to those hosts if any exist. Set `no_mx_lookups => true` to always connect to `relay` itself. MX lookups are always skipped when `relay` is an IP address or `tls_options` sets `{server_name_indication, disable}`, because the certificate check then has no name to tell the relay from a host a spoofed MX answer points at.
+- `no_mx_lookups` defaults to `false`: as in normal SMTP, the MX records of a domain `relay` are looked up and those hosts are dialled if any exist, falling back to `relay` itself. Set `no_mx_lookups => true` to always connect to `relay` directly. MX lookups are always skipped when `relay` is an IP address, or when `tls_options` sets `{server_name_indication, disable}`, because the certificate check then has no name to tell the relay from a host a spoofed MX answer points at.
 - Unless the email sets its own `Message-ID` header, one is generated from random bytes and the sender's domain, so the sending host's name does not leak.
 
 ### SendGrid

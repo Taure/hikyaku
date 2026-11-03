@@ -1,4 +1,47 @@
 -module(hikyaku_adapter_smtp).
+-moduledoc """
+SMTP adapter built on gen_smtp.
+
+Config keys: `relay` (required), `port` (default `587`), `username`,
+`password`, `ssl`, `tls`, `tls_options` and `no_mx_lookups`.
+
+## TLS
+
+`tls` defaults to `always`: STARTTLS is required, and a relay that does not
+offer it fails instead of receiving credentials or the message in clear. It
+defaults to `if_available` only with `ssl => true` (implicit TLS, port 465)
+or for a loopback relay (`localhost`, `127.0.0.0/8`, `::1`) without
+`username`.
+
+To send plain SMTP to a relay on a trusted private network that has no
+STARTTLS, opt out with `tls => if_available` (STARTTLS when offered,
+otherwise clear text) or `tls => never`:
+
+```erlang
+#{
+    adapter => hikyaku_adapter_smtp,
+    relay => ~"mailrelay.internal",
+    port => 25,
+    tls => if_available
+}
+```
+
+This is a downgrade: anyone on the path can strip STARTTLS and read the
+session, so only use it where the network itself is trusted.
+
+Certificates are verified against the OS trust store and must be valid for
+`relay`, which is also sent as SNI. `tls_options` replaces the default ssl
+client options; `relay` is still sent as SNI and `{depth, 3}` is added unless
+the list sets them.
+
+## MX lookups
+
+`no_mx_lookups` defaults to `false`: as in normal SMTP, the MX records of a
+domain `relay` are looked up and those hosts are dialled, falling back to
+`relay` when there are none. Set `no_mx_lookups => true` to always dial
+`relay` directly. An IP-literal `relay`, or `tls_options` with
+`{server_name_indication, disable}`, always skips the MX lookup.
+""".
 -behaviour(hikyaku_adapter).
 
 -include("hikyaku.hrl").
