@@ -1,6 +1,6 @@
 # Hikyaku
 
-Email delivery library for Erlang — composable email builder with swappable adapter backends.
+Email delivery library for Erlang — composable email builder with swappable adapter backends. The Erlang counterpart to Elixir's [Swoosh](https://github.com/swoosh/swoosh): build an email once, deliver it through any adapter.
 
 ## Features
 
