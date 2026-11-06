@@ -53,19 +53,62 @@ build_mimemail_reply_to_header_test() ->
     ReplyToHeader = proplists:get_value(<<"Reply-To">>, Headers),
     ?assertEqual(<<"reply@x.com">>, ReplyToHeader).
 
+encoded_attachment_keeps_filename_and_base64_test() ->
+    Data = <<0, 1, 2, 255, "binary payload">>,
+    Att = hikyaku_attachment:from_data(~"report.pdf", Data),
+    Email = hikyaku_email:attachment(build_email(~"text", undefined), Att),
+    Encoded = mimemail:encode(hikyaku_adapter_smtp:build_mimemail(Email)),
+    assert_attachment_part(Encoded, ~"attachment", ~"report.pdf", Data).
+
+encoded_attachment_keeps_content_type_params_test() ->
+    Att = hikyaku_attachment:from_data(~"data.csv", ~"a,b", #{
+        content_type => ~"text/csv; Charset=utf-8; header=present"
+    }),
+    Email = hikyaku_email:attachment(build_email(~"text", undefined), Att),
+    Encoded = mimemail:encode(hikyaku_adapter_smtp:build_mimemail(Email)),
+    ?assertMatch(
+        {match, _},
+        re:run(Encoded, ~"Content-Type: text/csv;\\s+charset=utf-8;\\s+header=present\\r\\n")
+    ),
+    ?assertMatch({match, [_]}, re:run(Encoded, ~"charset=", [global, caseless])).
+
+encoded_attachment_requotes_quoted_params_test() ->
+    Att = hikyaku_attachment:from_data(~"r.bin", ~"data", #{
+        content_type => <<"application/octet-stream; name=\"Q3 \\\"final\\\" v2.bin\"">>
+    }),
+    Email = hikyaku_email:attachment(build_email(~"text", undefined), Att),
+    Encoded = mimemail:encode(hikyaku_adapter_smtp:build_mimemail(Email)),
+    ?assertNotEqual(
+        nomatch,
+        binary:match(
+            Encoded,
+            <<"Content-Type: application/octet-stream;\r\n\tname=\"Q3 \\\"final\\\" v2.bin\"\r\n">>
+        )
+    ).
+
+encoded_inline_attachment_keeps_content_id_test() ->
+    Path = list_to_binary(?FILE),
+    Att = (hikyaku_attachment:inline(~"logo", Path))#hikyaku_attachment{
+        content_type = ~"image/png"
+    },
+    Email = hikyaku_email:attachment(build_email(undefined, undefined), Att),
+    Encoded = mimemail:encode(hikyaku_adapter_smtp:build_mimemail(Email)),
+    {ok, Data} = file:read_file(Path),
+    assert_attachment_part(Encoded, ~"inline", ~"hikyaku_adapter_smtp_test.erl", Data),
+    ?assertMatch({match, _}, re:run(Encoded, ~"Content-ID: <logo>", [caseless])).
+
 %%% SMTP options - relay certificate verification
 
 smtp_opts_tls_always_verifies_peer_test() ->
     Opts = hikyaku_adapter_smtp:build_smtp_opts(#{relay => <<"mail.example.com">>, tls => always}),
-    TlsOpts = proplists:get_value(tls_options, Opts),
+    TlsOpts = list_opt(tls_options, Opts),
     ?assertEqual(verify_peer, proplists:get_value(verify, TlsOpts)),
     ?assertNotEqual(undefined, proplists:get_value(cacerts, TlsOpts)),
     ?assertNotEqual(undefined, proplists:get_value(customize_hostname_check, TlsOpts)).
 
 smtp_opts_default_tls_verifies_peer_test() ->
-    %% tls defaults to if_available, which still upgrades - so it must verify.
     Opts = hikyaku_adapter_smtp:build_smtp_opts(#{relay => <<"mail.example.com">>}),
-    TlsOpts = proplists:get_value(tls_options, Opts),
+    TlsOpts = list_opt(tls_options, Opts),
     ?assertEqual(verify_peer, proplists:get_value(verify, TlsOpts)).
 
 smtp_opts_tls_never_omits_tls_options_test() ->
@@ -77,9 +120,180 @@ smtp_opts_caller_override_respected_test() ->
     Opts = hikyaku_adapter_smtp:build_smtp_opts(#{
         relay => <<"mail.example.com">>, tls => always, tls_options => Override
     }),
-    ?assertEqual(Override, proplists:get_value(tls_options, Opts)).
+    ?assertEqual(
+        [{server_name_indication, "mail.example.com"}, {verify, verify_none}, {depth, 3}],
+        proplists:get_value(tls_options, Opts)
+    ).
+
+smtp_opts_pins_relay_as_sni_test() ->
+    Opts = hikyaku_adapter_smtp:build_smtp_opts(#{relay => ~"mail.example.com", tls => always}),
+    TlsOpts = list_opt(tls_options, Opts),
+    ?assertEqual("mail.example.com", proplists:get_value(server_name_indication, TlsOpts)).
+
+smtp_opts_caller_sni_respected_test() ->
+    Opts = hikyaku_adapter_smtp:build_smtp_opts(#{
+        relay => ~"mail.example.com",
+        tls => always,
+        tls_options => [{server_name_indication, "relay.internal"}]
+    }),
+    ?assertEqual(
+        [{server_name_indication, "relay.internal"}, {depth, 3}],
+        proplists:get_value(tls_options, Opts)
+    ).
+
+smtp_opts_ip_relay_has_no_sni_test() ->
+    Opts = hikyaku_adapter_smtp:build_smtp_opts(#{relay => ~"192.0.2.10", tls => always}),
+    TlsOpts = list_opt(tls_options, Opts),
+    ?assertNot(proplists:is_defined(server_name_indication, TlsOpts)),
+    ?assertEqual(verify_peer, proplists:get_value(verify, TlsOpts)).
+
+smtp_opts_ssl_verifies_peer_test() ->
+    Opts = hikyaku_adapter_smtp:build_smtp_opts(#{
+        relay => ~"mail.example.com", port => 465, ssl => true, tls => never
+    }),
+    SockOpts = list_opt(sockopts, Opts),
+    ?assertEqual(verify_peer, proplists:get_value(verify, SockOpts)),
+    ?assertNotEqual(undefined, proplists:get_value(cacerts, SockOpts)),
+    ?assertEqual("mail.example.com", proplists:get_value(server_name_indication, SockOpts)),
+    ?assertEqual(undefined, proplists:get_value(tls_options, Opts)).
+
+smtp_opts_plain_has_no_sockopts_test() ->
+    Opts = hikyaku_adapter_smtp:build_smtp_opts(#{relay => ~"mail.example.com"}),
+    ?assertEqual(undefined, proplists:get_value(sockopts, Opts)).
+
+smtp_opts_credentials_require_tls_test() ->
+    Opts = hikyaku_adapter_smtp:build_smtp_opts(#{
+        relay => ~"mail.example.com", username => ~"user", password => ~"secret"
+    }),
+    ?assertEqual(always, proplists:get_value(tls, Opts)).
+
+smtp_opts_credentials_explicit_tls_respected_test() ->
+    Opts = hikyaku_adapter_smtp:build_smtp_opts(#{
+        relay => ~"mail.example.com",
+        username => ~"user",
+        password => ~"secret",
+        tls => if_available
+    }),
+    ?assertEqual(if_available, proplists:get_value(tls, Opts)).
+
+smtp_opts_credentials_over_ssl_keep_default_tls_test() ->
+    Opts = hikyaku_adapter_smtp:build_smtp_opts(#{
+        relay => ~"mail.example.com", ssl => true, username => ~"user", password => ~"secret"
+    }),
+    ?assertEqual(if_available, proplists:get_value(tls, Opts)).
+
+smtp_opts_no_mx_lookups_test() ->
+    Default = hikyaku_adapter_smtp:build_smtp_opts(#{relay => ~"mail.example.com"}),
+    ?assertEqual(undefined, proplists:get_value(no_mx_lookups, Default)),
+    Direct = hikyaku_adapter_smtp:build_smtp_opts(#{
+        relay => ~"mail.example.com", no_mx_lookups => true
+    }),
+    ?assertEqual(true, proplists:get_value(no_mx_lookups, Direct)).
+
+smtp_opts_caller_depth_respected_test() ->
+    Opts = hikyaku_adapter_smtp:build_smtp_opts(#{
+        relay => ~"mail.example.com", tls => always, tls_options => [{depth, 5}]
+    }),
+    ?assertEqual(5, proplists:get_value(depth, list_opt(tls_options, Opts))).
+
+smtp_opts_ip_relay_skips_mx_lookups_test_() ->
+    [
+        ?_assertEqual(
+            true,
+            proplists:get_value(
+                no_mx_lookups, hikyaku_adapter_smtp:build_smtp_opts(#{relay => Relay})
+            )
+        )
+     || Relay <- [~"10.0.0.5", ~"::1"]
+    ].
+
+smtp_opts_sni_disabled_skips_mx_lookups_test() ->
+    Opts = hikyaku_adapter_smtp:build_smtp_opts(#{
+        relay => ~"mail.example.com",
+        tls_options => [{verify, verify_peer}, {server_name_indication, disable}]
+    }),
+    ?assertEqual(true, proplists:get_value(no_mx_lookups, Opts)).
+
+smtp_opts_no_credentials_require_tls_test() ->
+    Opts = hikyaku_adapter_smtp:build_smtp_opts(#{relay => ~"mail.example.com"}),
+    ?assertEqual(always, proplists:get_value(tls, Opts)).
+
+smtp_opts_loopback_relay_tls_if_available_test_() ->
+    [
+        ?_assertEqual(
+            if_available,
+            proplists:get_value(tls, hikyaku_adapter_smtp:build_smtp_opts(#{relay => Relay}))
+        )
+     || Relay <- [~"localhost", ~"LOCALHOST", ~"127.0.0.1", ~"127.1.2.3", ~"::1"]
+    ].
+
+smtp_opts_loopback_relay_with_credentials_require_tls_test() ->
+    Opts = hikyaku_adapter_smtp:build_smtp_opts(#{
+        relay => ~"localhost", username => ~"user", password => ~"secret"
+    }),
+    ?assertEqual(always, proplists:get_value(tls, Opts)).
+
+message_id_does_not_leak_host_name_test() ->
+    Encoded = mimemail:encode(
+        hikyaku_adapter_smtp:build_mimemail(build_email(~"text", undefined))
+    ),
+    Host = list_to_binary(smtp_util:guess_FQDN()),
+    ?assertEqual(nomatch, binary:match(Encoded, <<"@", Host/binary>>)),
+    ?assertMatch(
+        {match, _}, re:run(Encoded, ~"\\r\\nMessage-ID: <[0-9a-f]{32}@example\\.com>\\r\\n")
+    ).
+
+message_id_for_idn_sender_test() ->
+    Email = hikyaku_email:from(
+        build_email(~"text", undefined), ~"bob@bücher.de"
+    ),
+    Encoded = mimemail:encode(hikyaku_adapter_smtp:build_mimemail(Email)),
+    ?assertMatch(
+        {match, _}, re:run(Encoded, ~"\\r\\nMessage-ID: <[0-9a-f]{32}@hikyaku\\.invalid>\\r\\n")
+    ).
+
+message_id_from_caller_kept_test() ->
+    Email = hikyaku_email:header(build_email(~"text", undefined), ~"Message-ID", ~"<id@x.test>"),
+    Encoded = mimemail:encode(hikyaku_adapter_smtp:build_mimemail(Email)),
+    ?assertMatch({match, [_]}, re:run(Encoded, ~"Message-ID:", [global])),
+    ?assertNotEqual(nomatch, binary:match(Encoded, ~"Message-ID: <id@x.test>")).
+
+display_name_with_specials_is_quoted_test() ->
+    Email = hikyaku_email:from(
+        build_email(~"text", undefined), {~"Bob <ceo@bank.com>, x", ~"bob@example.com"}
+    ),
+    Encoded = mimemail:encode(hikyaku_adapter_smtp:build_mimemail(Email)),
+    ?assertNotEqual(
+        nomatch, binary:match(Encoded, ~"From: \"Bob <ceo@bank.com>, x\" <bob@example.com>\r\n")
+    ).
 
 %%% Helpers
+
+list_opt(Key, Opts) ->
+    case proplists:get_value(Key, Opts) of
+        List when is_list(List) -> List
+    end.
+
+subparts({_, _, _, _, Parts}) when is_list(Parts) ->
+    Parts.
+
+assert_attachment_part(Encoded, Disposition, Filename, Data) ->
+    ?assertMatch(
+        {match, _},
+        re:run(
+            Encoded,
+            <<"Content-Disposition: ", Disposition/binary, ";\\s*filename=\"?", Filename/binary>>,
+            [caseless]
+        )
+    ),
+    ?assertMatch({match, _}, re:run(Encoded, ~"Content-Transfer-Encoding: base64", [caseless])),
+    Parts = subparts(mimemail:decode(Encoded)),
+    [{_, _, _, Params, Body}] = [
+        P
+     || {_, _, _, #{disposition := D}, _} = P <- Parts, D =:= Disposition
+    ],
+    ?assertEqual(Filename, proplists:get_value(~"filename", maps:get(disposition_params, Params))),
+    ?assertEqual(Data, Body).
 
 build_email(Text, Html) ->
     E0 = hikyaku_email:from(hikyaku_email:new(), {<<"Alice">>, <<"alice@example.com">>}),

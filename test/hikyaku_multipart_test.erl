@@ -39,3 +39,29 @@ boundary_structure_test() ->
     Closing = <<"--", Boundary/binary, "--\r\n">>,
     ?assertNotEqual(nomatch, binary:match(Body, Opening)),
     ?assertNotEqual(nomatch, binary:match(Body, Closing)).
+
+escapes_quotes_in_part_names_test() ->
+    Parts = [
+        {<<"h:X-\"Q\\">>, ~"v"},
+        {file, ~"attachment", <<"a.txt\"; x=\"evil.exe">>, ~"text/plain", ~"data"}
+    ],
+    {_ContentType, Body} = hikyaku_multipart:encode(Parts),
+    ?assertNotEqual(nomatch, binary:match(Body, <<"name=\"h:X-\\\"Q\\\\\"\r\n">>)),
+    ?assertNotEqual(nomatch, binary:match(Body, <<"filename=\"a.txt\\\"; x=\\\"evil.exe\"\r\n">>)).
+
+rejects_crlf_in_part_headers_test_() ->
+    [
+        ?_assertError({invalid_form_part, _}, hikyaku_multipart:encode([{~"a\r\nX: 1", ~"v"}])),
+        ?_assertError(
+            {invalid_form_part, _},
+            hikyaku_multipart:encode([{file, ~"f", ~"a.txt\nX: 1", ~"text/plain", ~"d"}])
+        ),
+        ?_assertError(
+            {invalid_form_part, _},
+            hikyaku_multipart:encode([{file, ~"f", ~"a.txt", ~"text/plain\r\nX: 1", ~"d"}])
+        )
+    ].
+
+field_values_may_contain_newlines_test() ->
+    {_ContentType, Body} = hikyaku_multipart:encode([{~"text", ~"line 1\r\nline 2"}]),
+    ?assertNotEqual(nomatch, binary:match(Body, ~"line 1\r\nline 2")).

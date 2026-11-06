@@ -74,6 +74,57 @@ deliver_with_reply_to_test() ->
     ReplyTo = maps:get(<<"reply_to">>, Decoded),
     ?assertEqual(<<"reply@x.com">>, maps:get(<<"email">>, ReplyTo)).
 
+deliver_with_attachments_test() ->
+    Data = <<0, 1, 2, 255, "pdf bytes">>,
+    Path = list_to_binary(?FILE),
+    {ok, PathData} = file:read_file(Path),
+    Logo = (hikyaku_attachment:inline(~"logo", Path))#hikyaku_attachment{
+        content_type = ~"image/png"
+    },
+    Email = hikyaku_email:attachment(
+        hikyaku_email:attachment(build_email(), hikyaku_attachment:from_data(~"report.pdf", Data)),
+        Logo
+    ),
+    Decoded = deliver_and_decode(Email),
+    [Pdf, Inline] = maps:get(~"attachments", Decoded),
+    ?assertEqual(
+        #{
+            ~"content" => base64:encode(Data),
+            ~"filename" => ~"report.pdf",
+            ~"type" => ~"application/pdf",
+            ~"disposition" => ~"attachment"
+        },
+        Pdf
+    ),
+    ?assertEqual(
+        #{
+            ~"content" => base64:encode(PathData),
+            ~"filename" => ~"hikyaku_adapter_sendgrid_test.erl",
+            ~"type" => ~"image/png",
+            ~"disposition" => ~"inline",
+            ~"content_id" => ~"logo"
+        },
+        Inline
+    ).
+
+deliver_sends_bare_media_type_test() ->
+    Att = hikyaku_attachment:from_data(~"data.csv", ~"a,b", #{
+        content_type => ~"text/csv; charset=utf-8; header=present"
+    }),
+    Decoded = deliver_and_decode(hikyaku_email:attachment(build_email(), Att)),
+    [Sent] = maps:get(~"attachments", Decoded),
+    ?assertEqual(~"text/csv", maps:get(~"type", Sent)).
+
+deliver_with_headers_test() ->
+    Email = hikyaku_email:header(build_email(), ~"X-Campaign", ~"welcome"),
+    Decoded = deliver_and_decode(Email),
+    ?assertEqual(#{~"X-Campaign" => ~"welcome"}, maps:get(~"headers", Decoded)).
+
+deliver_without_attachments_or_headers_omits_them_test() ->
+    Decoded = deliver_and_decode(build_email()),
+    ?assertNot(maps:is_key(~"attachments", Decoded)),
+    ?assertNot(maps:is_key(~"headers", Decoded)).
+
 deliver_http_error_test() ->
     Email = build_email(),
     Config = #{
@@ -84,6 +135,20 @@ deliver_http_error_test() ->
     {error, #{status_code := 400}} = hikyaku_adapter_sendgrid:deliver(Email, Config).
 
 %%% Helpers
+
+deliver_and_decode(Email) ->
+    Config = #{
+        adapter => hikyaku_adapter_sendgrid,
+        api_key => ~"test-key",
+        http_client => ?MODULE
+    },
+    {ok, _} = hikyaku_adapter_sendgrid:deliver(Email, Config),
+    case persistent_term:get(sendgrid_test_body) of
+        Body when is_binary(Body) ->
+            case json:decode(Body) of
+                #{} = Decoded -> Decoded
+            end
+    end.
 
 build_email() ->
     hikyaku_email:subject(

@@ -43,10 +43,12 @@ deliver(Email, Config) ->
 
 %%% Internal
 
-build_payload(#hikyaku_email{attachments = Attachments} = Email) when Attachments =/= [] ->
-    build_raw_payload(Email);
+build_payload(#hikyaku_email{attachments = [], headers = Headers} = Email) when
+    map_size(Headers) =:= 0
+->
+    build_simple_payload(Email);
 build_payload(Email) ->
-    build_simple_payload(Email).
+    build_raw_payload(Email).
 
 build_simple_payload(#hikyaku_email{
     from = From,
@@ -77,7 +79,7 @@ build_simple_payload(#hikyaku_email{
         }
     },
     Payload0 = #{
-        <<"FromEmailAddress">> => format_address(From),
+        <<"FromEmailAddress">> => hikyaku_address:format(From),
         <<"Destination">> => Destination,
         <<"Content">> => Content
     },
@@ -100,30 +102,25 @@ build_raw_payload(
         <<"Raw">> => #{<<"Data">> => RawData}
     },
     Payload0 = #{
-        <<"FromEmailAddress">> => format_address(From),
+        <<"FromEmailAddress">> => hikyaku_address:format(From),
         <<"Destination">> => Destination,
         <<"Content">> => Content
     },
     maybe_add_reply_to(Payload0, ReplyTo).
 
 build_destination(To, Cc, Bcc) ->
-    D0 = #{<<"ToAddresses">> => [format_address(A) || A <- To]},
+    D0 = #{<<"ToAddresses">> => [hikyaku_address:format(A) || A <- To]},
     D1 =
         case Cc of
             [] -> D0;
-            _ -> D0#{<<"CcAddresses">> => [format_address(A) || A <- Cc]}
+            _ -> D0#{<<"CcAddresses">> => [hikyaku_address:format(A) || A <- Cc]}
         end,
     case Bcc of
         [] -> D1;
-        _ -> D1#{<<"BccAddresses">> => [format_address(A) || A <- Bcc]}
+        _ -> D1#{<<"BccAddresses">> => [hikyaku_address:format(A) || A <- Bcc]}
     end.
 
 maybe_add_reply_to(Payload, undefined) ->
     Payload;
 maybe_add_reply_to(Payload, ReplyTo) ->
-    Payload#{<<"ReplyToAddresses">> => [format_address(ReplyTo)]}.
-
-format_address(#hikyaku_address{name = undefined, address = Addr}) ->
-    Addr;
-format_address(#hikyaku_address{name = Name, address = Addr}) ->
-    <<Name/binary, " <", Addr/binary, ">">>.
+    Payload#{<<"ReplyToAddresses">> => [hikyaku_address:format(ReplyTo)]}.

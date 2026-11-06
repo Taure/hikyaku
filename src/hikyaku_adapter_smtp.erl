@@ -1,4 +1,47 @@
 -module(hikyaku_adapter_smtp).
+-moduledoc """
+SMTP adapter built on gen_smtp.
+
+Config keys: `relay` (required), `port` (default `587`), `username`,
+`password`, `ssl`, `tls`, `tls_options` and `no_mx_lookups`.
+
+## TLS
+
+`tls` defaults to `always`: STARTTLS is required, and a relay that does not
+offer it fails instead of receiving credentials or the message in clear. It
+defaults to `if_available` only with `ssl => true` (implicit TLS, port 465)
+or for a loopback relay (`localhost`, `127.0.0.0/8`, `::1`) without
+`username`.
+
+To send plain SMTP to a relay on a trusted private network that has no
+STARTTLS, opt out with `tls => if_available` (STARTTLS when offered,
+otherwise clear text) or `tls => never`:
+
+```erlang
+#{
+    adapter => hikyaku_adapter_smtp,
+    relay => ~"mailrelay.internal",
+    port => 25,
+    tls => if_available
+}
+```
+
+This is a downgrade: anyone on the path can strip STARTTLS and read the
+session, so only use it where the network itself is trusted.
+
+Certificates are verified against the OS trust store and must be valid for
+`relay`, which is also sent as SNI. `tls_options` replaces the default ssl
+client options; `relay` is still sent as SNI and `{depth, 3}` is added unless
+the list sets them.
+
+## MX lookups
+
+`no_mx_lookups` defaults to `false`: as in normal SMTP, the MX records of a
+domain `relay` are looked up and those hosts are dialled, falling back to
+`relay` when there are none. Set `no_mx_lookups => true` to always dial
+`relay` directly. An IP-literal `relay`, or `tls_options` with
+`{server_name_indication, disable}`, always skips the MX lookup.
+""".
 -behaviour(hikyaku_adapter).
 
 -include("hikyaku.hrl").
@@ -32,12 +75,13 @@ collect_recipients(#hikyaku_email{to = To, cc = Cc, bcc = Bcc}) ->
     [A#hikyaku_address.address || A <- To ++ Cc ++ Bcc].
 
 build_smtp_opts(Config) ->
-    Relay = maps:get(relay, Config),
+    Relay = binary_to_list(maps:get(relay, Config)),
     Port = maps:get(port, Config, 587),
     Username = maps:get(username, Config, undefined),
     Password = maps:get(password, Config, undefined),
+    Ssl = maps:get(ssl, Config, false),
     Opts0 = [
-        {relay, binary_to_list(Relay)},
+        {relay, Relay},
         {port, Port}
     ],
     Opts1 =
@@ -48,29 +92,77 @@ build_smtp_opts(Config) ->
                 Opts0 ++
                     [{username, binary_to_list(Username)}, {password, binary_to_list(Password)}]
         end,
+    %% gen_smtp hands `tls_options` only to STARTTLS; an implicit TLS (ssl)
+    %% connection takes its ssl options from `sockopts`.
     Opts2 =
-        case maps:get(ssl, Config, false) of
-            true -> Opts1 ++ [{ssl, true}];
+        case Ssl of
+            true -> Opts1 ++ [{ssl, true}, {sockopts, tls_options(Relay, Config)}];
             false -> Opts1
         end,
-    Tls = maps:get(tls, Config, if_available),
+    Tls = maps:get(tls, Config, default_tls(Ssl, Username, Relay)),
     Opts3 =
         case Tls of
             always -> Opts2 ++ [{tls, always}];
             never -> Opts2 ++ [{tls, never}];
             if_available -> Opts2 ++ [{tls, if_available}]
         end,
-    %% When TLS is used at all, authenticate the relay's certificate. gen_smtp's
-    %% default tls_options are verify_none, so without this an on-path attacker
-    %% can present any cert, complete STARTTLS, and capture the SMTP AUTH
-    %% credentials. Callers can override via a `tls_options` config key.
-    case Tls =/= never orelse maps:get(ssl, Config, false) of
-        true -> Opts3 ++ [{tls_options, tls_options(Config)}];
-        false -> Opts3
+    Opts4 =
+        case Tls of
+            never -> Opts3;
+            _ -> Opts3 ++ [{tls_options, tls_options(Relay, Config)}]
+        end,
+    case no_mx_lookups(Relay, Config) of
+        true -> Opts4 ++ [{no_mx_lookups, true}];
+        false -> Opts4
     end.
 
-tls_options(Config) ->
-    maps:get(tls_options, Config, default_tls_options()).
+%% `if_available` lets an on-path attacker strip STARTTLS from the EHLO reply
+%% and read the AUTH exchange and the message in clear, so it is only the
+%% default for an unauthenticated loopback relay.
+default_tls(true, _Username, _Relay) ->
+    if_available;
+default_tls(false, undefined, Relay) ->
+    case is_loopback(Relay) of
+        true -> if_available;
+        false -> always
+    end;
+default_tls(false, _Username, _Relay) ->
+    always.
+
+%% Without a name to verify against, the certificate check cannot tell the
+%% relay from whatever host a spoofed MX answer points at, so dial the relay.
+no_mx_lookups(Relay, Config) ->
+    TlsOpts = maps:get(tls_options, Config, []),
+    maps:get(no_mx_lookups, Config, false) orelse is_ip_address(Relay) orelse
+        proplists:get_value(server_name_indication, TlsOpts) =:= disable.
+
+%% gen_smtp may dial an MX host or a resolved IP address rather than the relay
+%% name, and a STARTTLS upgrade has no host name at all, so the relay name is
+%% pinned as SNI and as the reference identity for certificate verification.
+%% gen_smtp's own ssl defaults include `{depth, 0}`, which rejects any chain
+%% with an intermediate, so caller options get a depth unless they set one.
+tls_options(Relay, Config) ->
+    TlsOpts0 = maps:get(tls_options, Config, default_tls_options()),
+    TlsOpts1 =
+        case proplists:is_defined(depth, TlsOpts0) of
+            true -> TlsOpts0;
+            false -> TlsOpts0 ++ [{depth, 3}]
+        end,
+    case proplists:is_defined(server_name_indication, TlsOpts1) orelse is_ip_address(Relay) of
+        true -> TlsOpts1;
+        false -> [{server_name_indication, Relay} | TlsOpts1]
+    end.
+
+is_ip_address(Host) ->
+    element(1, inet:parse_address(Host)) =:= ok.
+
+is_loopback(Host) ->
+    case inet:parse_address(Host) of
+        {ok, {127, _, _, _}} -> true;
+        {ok, {0, 0, 0, 0, 0, 0, 0, 1}} -> true;
+        {ok, _} -> false;
+        {error, _} -> string:lowercase(Host) =:= "localhost"
+    end.
 
 default_tls_options() ->
     [
@@ -96,23 +188,47 @@ build_mimemail(Email) ->
         attachments = Attachments
     } = Email,
     Headers0 = [
-        {<<"From">>, format_address(From)},
-        {<<"To">>, format_address_list(To)},
+        {<<"From">>, hikyaku_address:format(From)},
+        {<<"To">>, hikyaku_address:format_list(To)},
         {<<"Subject">>, Subject}
     ],
     Headers1 =
         case Cc of
             [] -> Headers0;
-            _ -> Headers0 ++ [{<<"Cc">>, format_address_list(Cc)}]
+            _ -> Headers0 ++ [{<<"Cc">>, hikyaku_address:format_list(Cc)}]
         end,
     Headers2 =
         case ReplyTo of
             undefined -> Headers1;
-            _ -> Headers1 ++ [{<<"Reply-To">>, format_address(ReplyTo)}]
+            _ -> Headers1 ++ [{<<"Reply-To">>, hikyaku_address:format(ReplyTo)}]
         end,
     Headers3 = Headers2 ++ maps:fold(fun(K, V, Acc) -> [{K, V} | Acc] end, [], CustomHeaders),
+    Headers4 =
+        case lists:member(~"message-id", [string:lowercase(K) || K <- maps:keys(CustomHeaders)]) of
+            true -> Headers3;
+            false -> Headers3 ++ [{~"Message-ID", message_id(From)}]
+        end,
     {Type, SubType, BodyHeaders, _Params, SubParts} = build_body(Text, Html, Attachments),
-    {Type, SubType, Headers3 ++ BodyHeaders, #{}, SubParts}.
+    {Type, SubType, Headers4 ++ BodyHeaders, #{}, SubParts}.
+
+%% mimemail would otherwise generate one from the host FQDN, which leaks the
+%% sending machine's name to every recipient.
+message_id(#hikyaku_address{address = Address}) ->
+    Random = binary:encode_hex(crypto:strong_rand_bytes(16), lowercase),
+    <<"<", Random/binary, "@", (message_id_domain(Address))/binary, ">">>.
+
+%% A non-ASCII (IDN) domain would be RFC 2047-encoded by mimemail, which
+%% is not a valid msg-id.
+message_id_domain(Address) ->
+    case binary:split(Address, ~"@") of
+        [_, Rest] ->
+            message_id_domain(Rest);
+        [Domain] ->
+            case re:run(Domain, ~"\\A[A-Za-z0-9.-]+\\z") of
+                {match, _} -> Domain;
+                nomatch -> ~"hikyaku.invalid"
+            end
+    end.
 
 build_body(Text, Html, Attachments) when Attachments =/= [] ->
     ContentParts = content_parts(Text, Html),
@@ -147,20 +263,16 @@ content_parts(T, H) when is_binary(T), is_binary(H) ->
         ]}
     ].
 
-build_attachment_part(#hikyaku_attachment{
-    filename = Filename,
-    content_type = ContentType,
-    data = Data0,
-    path = Path,
-    disposition = Disposition,
-    cid = Cid
-}) ->
-    Data =
-        case Data0 of
-            undefined when is_binary(Path) -> read_file(Path);
-            Bin when is_binary(Bin) -> Bin
-        end,
-    [Type, SubType] = binary:split(ContentType, <<"/">>),
+build_attachment_part(
+    #hikyaku_attachment{
+        filename = Filename,
+        content_type = ContentType,
+        disposition = Disposition,
+        cid = Cid
+    } = Att
+) ->
+    Data = hikyaku_attachment:content(Att),
+    {Type, SubType, ContentTypeParams} = hikyaku_attachment:parse_content_type(ContentType),
     DispBin =
         case Disposition of
             inline -> <<"inline">>;
@@ -172,21 +284,9 @@ build_attachment_part(#hikyaku_attachment{
             _ -> [{<<"Content-ID">>, <<"<", Cid/binary, ">">>}]
         end,
     Params = #{
-        <<"disposition">> => DispBin,
-        <<"disposition-params">> => [{<<"filename">>, Filename}],
-        <<"transfer-encoding">> => <<"base64">>
+        content_type_params => ContentTypeParams,
+        disposition => DispBin,
+        disposition_params => [{~"filename", Filename}],
+        transfer_encoding => ~"base64"
     },
     {Type, SubType, Headers, Params, Data}.
-
-read_file(Path) ->
-    {ok, Data} = file:read_file(Path),
-    Data.
-
-format_address(#hikyaku_address{name = undefined, address = Addr}) ->
-    Addr;
-format_address(#hikyaku_address{name = Name, address = Addr}) ->
-    <<Name/binary, " <", Addr/binary, ">">>.
-
-format_address_list(Addrs) ->
-    Formatted = [format_address(A) || A <- Addrs],
-    iolist_to_binary(lists:join(<<", ">>, Formatted)).

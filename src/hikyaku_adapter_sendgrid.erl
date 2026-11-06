@@ -35,7 +35,9 @@ build_payload(#hikyaku_email{
     bcc = Bcc,
     reply_to = ReplyTo,
     text_body = Text,
-    html_body = Html
+    html_body = Html,
+    headers = Headers,
+    attachments = Attachments
 }) ->
     Personalizations = build_personalizations(To, Cc, Bcc),
     Payload0 = #{
@@ -45,7 +47,8 @@ build_payload(#hikyaku_email{
     },
     Payload1 = maybe_add_content(Payload0, Text, Html),
     Payload2 = maybe_add_reply_to(Payload1, ReplyTo),
-    Payload2.
+    Payload3 = maybe_add_headers(Payload2, Headers),
+    maybe_add_attachments(Payload3, Attachments).
 
 build_personalizations(To, Cc, Bcc) ->
     P0 = #{<<"to">> => [encode_address(A) || A <- To]},
@@ -90,3 +93,33 @@ maybe_add_reply_to(Payload, undefined) ->
     Payload;
 maybe_add_reply_to(Payload, ReplyTo) ->
     Payload#{<<"reply_to">> => encode_address(ReplyTo)}.
+
+maybe_add_headers(Payload, Headers) when map_size(Headers) =:= 0 ->
+    Payload;
+maybe_add_headers(Payload, Headers) ->
+    Payload#{~"headers" => Headers}.
+
+maybe_add_attachments(Payload, []) ->
+    Payload;
+maybe_add_attachments(Payload, Attachments) ->
+    Payload#{~"attachments" => [encode_attachment(A) || A <- Attachments]}.
+
+%% SendGrid refuses a `type` containing `;`, so parameters are dropped.
+encode_attachment(
+    #hikyaku_attachment{
+        filename = Filename,
+        content_type = ContentType,
+        disposition = Disposition,
+        cid = Cid
+    } = Att
+) ->
+    Encoded = #{
+        ~"content" => base64:encode(hikyaku_attachment:content(Att)),
+        ~"filename" => Filename,
+        ~"type" => hikyaku_attachment:media_type(ContentType),
+        ~"disposition" => atom_to_binary(Disposition)
+    },
+    case Cid of
+        undefined -> Encoded;
+        _ -> Encoded#{~"content_id" => Cid}
+    end.

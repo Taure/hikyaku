@@ -66,3 +66,65 @@ content_type_detection_test_() ->
             (hikyaku_attachment:from_data(<<"f.xyz">>, <<>>))#hikyaku_attachment.content_type
         )
     ].
+
+rejects_invalid_content_type_test_() ->
+    [
+        ?_assertError(
+            {invalid_attachment, content_type, CT},
+            hikyaku_attachment:from_data(~"a.txt", ~"data", #{content_type => CT})
+        )
+     || CT <- [
+            ~"text/plain\r\nX-CT: 1",
+            ~"text/plain; charset=utf-8\r\nX-CT: 1",
+            <<"text/plain; name=\"a\r\nX-CT: 1\"">>,
+            <<"text/plain; name=\"a\tb\"">>,
+            ~"text/plain;",
+            ~"text/plain; charset=",
+            ~"text/plain; =utf-8",
+            ~"text/plain; charset",
+            <<"text/plain; name=\"unterminated">>,
+            ~"text",
+            ~"text/",
+            ~"/plain",
+            ~"text/plain\n"
+        ]
+    ].
+
+accepts_token_content_types_test_() ->
+    [
+        ?_assertEqual(
+            CT,
+            (hikyaku_attachment:from_data(~"a.bin", ~"d", #{content_type => CT}))#hikyaku_attachment.content_type
+        )
+     || CT <- [
+            ~"application/vnd.ms-excel",
+            ~"image/svg+xml",
+            ~"application/x-custom",
+            ~"text/plain; charset=utf-8",
+            ~"text/csv; charset=utf-8; header=present",
+            ~"text/plain;charset=utf-8",
+            <<"application/octet-stream; name=\"Q3 report; final.bin\"">>,
+            <<"application/octet-stream; name=\"say \\\"hi\\\"\"">>
+        ]
+    ].
+
+rejects_control_characters_in_filename_test_() ->
+    [
+        ?_assertError(
+            {invalid_attachment, filename, _},
+            hikyaku_attachment:from_data(~"a.txt\"\r\nX-File: 1", ~"data")
+        ),
+        ?_assertError(
+            {invalid_attachment, filename, _},
+            hikyaku_attachment:from_path(~"/tmp/a.txt", #{filename => ~"a\nb.txt"})
+        ),
+        ?_assertError({invalid_attachment, filename, _}, hikyaku_attachment:from_data(~"", ~"d"))
+    ].
+
+rejects_invalid_cid_test_() ->
+    [
+        ?_assertError(
+            {invalid_attachment, cid, Cid}, hikyaku_attachment:inline(Cid, ~"/tmp/logo.png")
+        )
+     || Cid <- [~"c>\r\nX-Cid: 1", ~"<logo>", ~"lo go", ~""]
+    ].
