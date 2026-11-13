@@ -1,5 +1,5 @@
 {application, hikyaku, [
-    {description, "Email delivery library for Erlang with swappable adapter backends"},
+    {description, "Email library for Erlang with SMTP, SendGrid, Mailgun and Amazon SES adapters"},
     {vsn, git},
     {registered, []},
     {mod, {hikyaku_app, []}},
